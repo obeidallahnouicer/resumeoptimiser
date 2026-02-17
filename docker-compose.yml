@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./resumeoptimiser
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - DEBUG=False
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=gpt-4o-mini
+      - MAX_UPLOAD_SIZE_MB=50
+      - UPLOAD_TEMP_DIR=/app/temp_uploads
+      - BUILD_OUTPUT_DIR=/app/build
+      - FRONTEND_URL=http://localhost:3000
+    volumes:
+      - ./resumeoptimiser/temp_uploads:/app/temp_uploads
+      - ./resumeoptimiser/build:/app/build
+    networks:
+      - resume-network
+
+  frontend:
+    build:
+      context: ./cyberresume-optimiser
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+      - VITE_API_TIMEOUT=60000
+      - VITE_ENABLE_MOCK_MODE=false
+      - VITE_MAX_FILE_SIZE_MB=50
+      - VITE_ALLOWED_FILE_TYPES=application/pdf
+    depends_on:
+      - backend
+    networks:
+      - resume-network
+
+networks:
+  resume-network:
+    driver: bridge
