@@ -1,0 +1,186 @@
+{
+  "name": "Alex Johnson",
+  "email": "alex@example.com",
+  "phone": "+1-555-0123",
+  "summary": "Full-stack software engineer with 6 years of experience building scalable systems and leading teams.",
+  "skills": [
+    {
+      "name": "Python",
+      "years": 6,
+      "level": "expert",
+      "projects": [
+        "DataPipeline",
+        "WebApp",
+        "MLModel"
+      ],
+      "description": "Backend development, data processing, and ML"
+    },
+    {
+      "name": "React",
+      "years": 5,
+      "level": "advanced",
+      "projects": [
+        "WebApp",
+        "Dashboard"
+      ],
+      "description": "Frontend UI development"
+    },
+    {
+      "name": "FastAPI",
+      "years": 4,
+      "level": "advanced",
+      "projects": [
+        "WebApp",
+        "API"
+      ],
+      "description": "REST API development"
+    },
+    {
+      "name": "PostgreSQL",
+      "years": 5,
+      "level": "advanced",
+      "projects": [
+        "DataPipeline",
+        "WebApp"
+      ],
+      "description": "Database design and optimization"
+    },
+    {
+      "name": "AWS",
+      "years": 4,
+      "level": "advanced",
+      "projects": [
+        "WebApp",
+        "Deployment"
+      ],
+      "description": "Cloud infrastructure and deployment"
+    },
+    {
+      "name": "Docker",
+      "years": 3,
+      "level": "intermediate",
+      "projects": [
+        "WebApp"
+      ],
+      "description": "Containerization"
+    },
+    {
+      "name": "Kubernetes",
+      "years": 2,
+      "level": "intermediate",
+      "projects": [
+        "Deployment"
+      ],
+      "description": "Orchestration and scaling"
+    },
+    {
+      "name": "TensorFlow",
+      "years": 2,
+      "level": "intermediate",
+      "projects": [
+        "MLModel"
+      ],
+      "description": "Machine learning models"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Senior Software Engineer",
+      "company": "TechFlow Inc.",
+      "duration_months": 24,
+      "role": "Lead backend engineer and technical lead",
+      "bullet_points": [
+        "Architected and deployed microservices system using FastAPI and PostgreSQL",
+        "Led team of 3 engineers on critical data pipeline project",
+        "Implemented automated testing and CI/CD reducing deployment time by 60%"
+      ],
+      "measurable_impact": [
+        "60% reduction in deployment time",
+        "10M+ records processed daily",
+        "99.9% uptime maintained"
+      ],
+      "technologies": [
+        "Python",
+        "FastAPI",
+        "PostgreSQL",
+        "Docker",
+        "AWS"
+      ]
+    },
+    {
+      "title": "Software Engineer",
+      "company": "DataSystems Ltd.",
+      "duration_months": 36,
+      "role": "Full-stack engineer",
+      "bullet_points": [
+        "Built React-based dashboards for data visualization",
+        "Developed Python backend services for real-time data processing",
+        "Optimized database queries improving performance by 45%"
+      ],
+      "measurable_impact": [
+        "45% query performance improvement",
+        "Reduced API response time from 2s to 400ms"
+      ],
+      "technologies": [
+        "Python",
+        "React",
+        "PostgreSQL",
+        "AWS"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "DataPipeline",
+      "description": "Real-time ETL system processing financial data",
+      "technologies": [
+        "Python",
+        "Pandas",
+        "PostgreSQL",
+        "Docker"
+      ],
+      "impact": "Processed 10M+ records daily with 99.9% accuracy",
+      "duration_months": 12,
+      "link": "https://github.com/alexjohnson/datapipeline"
+    },
+    {
+      "name": "WebApp",
+      "description": "Full-stack web application with React frontend and FastAPI backend",
+      "technologies": [
+        "React",
+        "FastAPI",
+        "PostgreSQL",
+        "AWS",
+        "Docker"
+      ],
+      "impact": "Served 100K+ users with <200ms response time",
+      "duration_months": 18,
+      "link": "https://github.com/alexjohnson/webapp"
+    },
+    {
+      "name": "MLModel",
+      "description": "Machine learning model for prediction",
+      "technologies": [
+        "Python",
+        "TensorFlow",
+        "Pandas",
+        "Scikit-learn"
+      ],
+      "impact": "Achieved 92% accuracy on test set",
+      "duration_months": 6,
+      "link": "https://github.com/alexjohnson/mlmodel"
+    }
+  ],
+  "domain_knowledge": [
+    "System Architecture",
+    "Microservices",
+    "Cloud Infrastructure",
+    "DevOps",
+    "Data Engineering"
+  ],
+  "learning_mode": [
+    "Kubernetes advanced",
+    "GraphQL",
+    "Rust"
+  ]
+}
