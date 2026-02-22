@@ -33,12 +33,17 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 50))
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
-# OpenRouter Configuration
+# OpenRouter Configuration (legacy, kept for compatibility)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "http://localhost:3000")
 OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "Resume Optimiser")
+
+# NVIDIA API Configuration
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "deepseek-ai/deepseek-v3.1")
 
 # CORS Configuration
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -48,6 +53,7 @@ LATEX_TIMEOUT = 30  # seconds
 LATEX_INTERACTION_MODE = "nonstopmode"
 
 # Skill Matching Configuration
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"  # BGE (BAAI General Embedding) model for skill similarity
 MIN_TRANSFERABLE_SIMILARITY = 0.5
 MIN_DIRECT_SIMILARITY = 0.95
 
