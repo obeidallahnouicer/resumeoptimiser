@@ -9,7 +9,6 @@ from src.models.schemas import EndToEndResponse
 from src.services.jd_parser import parse_jd_with_llm, validate_parsed_jd
 from src.services.skill_matcher import match_skills, load_base_skills
 from src.services.scoring_engine import score_cv
-from src.services.cv_rewriter import rewrite_cv
 from src.services.pdf_compiler import compile_latex_to_pdf
 from src.core.config import MAX_UPLOAD_SIZE_BYTES, TEMP_UPLOAD_DIR
 
@@ -114,37 +113,27 @@ async def generate_cv_endpoint(
         logs.append(f"[SCORE] Sponsorship Feasibility: {cv_score.breakdown.sponsorship_feasibility}/15")
         logger.info(f"✓ CV Scored: {cv_score.total_score:.1f}/100 ({cv_score.category.upper()}) - Recommendation: {cv_score.recommendation}")
 
-        # Step 4: Rewrite CV
-        logger.info("[4/6] Generating optimized CV with LaTeX formatting...")
-        logs.append("[GEN] Generating optimized CV with LaTeX formatting...")
-        rewritten_cv = rewrite_cv(base_skills, skill_match, cv_score)
-        logs.append("[GEN] ✓ CV rewritten and tailored to job requirements")
-        logger.info("✓ CV Rewritten: LaTeX content generated")
+        # Step 4: Rewrite CV (DEPRECATED - use /api/v1/cv-rewrite instead)
+        logger.info("[4/6] CV rewriting moved to /api/v1/cv-rewrite endpoint...")
+        logs.append("[GEN] Use /api/v1/cv-rewrite endpoint for CV generation with profile.md")
+        logger.info("✓ For CV rewriting, use the new cv_rewrite API endpoint")
 
-        # Step 5: Compile PDF
-        logger.info("[5/6] Compiling LaTeX to PDF...")
-        logs.append("[COMPILE] Compiling LaTeX to PDF...")
-        success, pdf_path, error_msg = compile_latex_to_pdf(rewritten_cv.latex_content)
+        # Step 5: Skip PDF compilation (use cv_rewrite endpoint instead)
+        logger.info("[5/6] PDF compilation - use cv_rewrite endpoint...")
+        logs.append("[COMPILE] PDF compilation available via cv_rewrite endpoint")
+        pdf_path = None
 
-        if not success:
-            logs.append(f"[COMPILE] ⚠ PDF compilation skipped: {error_msg}")
-            logger.warning(f"⚠ PDF compilation unavailable: {error_msg}")
-            pdf_path = None
-        else:
-            logs.append(f"[COMPILE] ✓ PDF generated successfully: {pdf_path}")
-            logger.info(f"✓ PDF Compiled: {pdf_path}")
-
-        logger.info("[6/6] CV optimization complete!")
-        logs.append("[SUCCESS] ✓ CV optimization complete!")
+        logger.info("[6/6] CV optimization analysis complete!")
+        logs.append("[SUCCESS] ✓ CV analysis complete! Use /api/v1/cv-rewrite for PDF generation")
         logger.info("=" * 60)
-        logger.info("✅ CV Generation Request Completed Successfully")
+        logger.info("✅ CV Analysis Request Completed Successfully")
         logger.info("=" * 60)
 
         return EndToEndResponse(
             parsed_jd=parsed_jd,
             skill_match=skill_match,
             cv_score=cv_score,
-            rewritten_cv=rewritten_cv,
+            rewritten_cv=None,
             pdf_path=pdf_path,
             logs=logs
         )
