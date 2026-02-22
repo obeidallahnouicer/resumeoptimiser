@@ -155,3 +155,69 @@ class EndToEndResponse(BaseModel):
     rewritten_cv: RewrittenCV
     pdf_path: Optional[str] = None
     logs: List[str] = []
+
+
+# ============= SEMANTIC CV MATCHING SCHEMA =============
+
+class SemanticMatchingRequest(BaseModel):
+    """Request for semantic CV to JD matching."""
+    cv_pdf_path: str
+    job_description_text: str
+    profile_md_path: Optional[str] = None
+
+
+class GapAnalysisItem(BaseModel):
+    """Item in gap analysis."""
+    gap_id: str
+    requirement: str
+    gap_type: Literal[
+        "skill_gap",
+        "wording_gap",
+        "structural_gap",
+        "experience_gap",
+        "education_gap",
+        "requirement_gap"
+    ]
+    severity: Literal["critical", "high", "moderate", "low"]
+    similarity: float = Field(ge=0, le=1)
+    closest_match: Optional[str] = None
+    suggested_improvement: Optional[str] = None
+    source: Optional[str] = None
+
+
+class SemanticMatchResult(BaseModel):
+    """Result of semantic CV matching."""
+    overall_score: float = Field(ge=0, le=1)
+    confidence: Literal["strong", "viable", "risky", "low"]
+    section_scores: Dict[str, Dict[str, Any]]
+    skill_match_ratio: float = Field(ge=0, le=1)
+    gaps: List[GapAnalysisItem]
+    critical_gaps: int
+    recommendations: List[str]
+
+
+class CVOptimizationRequest(BaseModel):
+    """Request to optimize CV based on JD."""
+    cv_pdf_path: str
+    job_description_text: str
+    profile_md_path: Optional[str] = None
+    apply_optimizations: bool = False
+
+
+class CVOptimizationResult(BaseModel):
+    """Result of CV optimization."""
+    original_score: float = Field(ge=0, le=1)
+    optimized_score: float = Field(ge=0, le=1)
+    improvement_delta: float
+    improvements_made: List[str]
+    optimized_sections: Dict[str, str]
+    warnings: List[str] = []
+    compliance_check: Dict[str, bool]  # e.g. {"no_hallucination": True}
+
+
+class SemanticCVReport(BaseModel):
+    """Complete semantic CV matching report."""
+    matching_result: SemanticMatchResult
+    optimization_result: Optional[CVOptimizationResult] = None
+    analysis_timestamp: str
+    summary: str
