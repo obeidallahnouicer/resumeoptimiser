@@ -1,12 +1,14 @@
 """FastAPI application factory."""
 
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 from src.core.config import API_PREFIX, API_VERSION, DEBUG, FRONTEND_URL, TEMP_UPLOAD_DIR
 from src.core.logging_config import setup_logging
-from src.api import base_skills, jd, matching, scoring, rewriting, pdf, generation
+from src.api import base_skills, jd, matching, scoring, rewriting, pdf, generation, semantic_matching, cv_rewrite
 
 # Setup logging
 setup_logging()
@@ -34,6 +36,26 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Custom exception handler for RequestValidationError
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Handle validation errors without encoding issues."""
+        # Create safe error details without trying to encode uploaded file objects
+        errors = []
+        for error in exc.errors():
+            error_dict = {
+                "loc": error.get("loc"),
+                "msg": error.get("msg"),
+                "type": error.get("type")
+            }
+            errors.append(error_dict)
+        
+        logger.warning(f"Validation error: {errors}")
+        return JSONResponse(
+            status_code=422,
+            content={"detail": errors}
+        )
+
     # Initialize base skills
     @app.on_event("startup")
     async def startup_event():
@@ -50,6 +72,8 @@ def create_app() -> FastAPI:
     app.include_router(rewriting.router, prefix=API_PREFIX)
     app.include_router(pdf.router, prefix=API_PREFIX)
     app.include_router(generation.router, prefix=API_PREFIX)
+    app.include_router(semantic_matching.router, prefix=API_PREFIX)
+    app.include_router(cv_rewrite.router, prefix=API_PREFIX)
 
     # Health check
     @app.get("/health")
@@ -77,6 +101,9 @@ def create_app() -> FastAPI:
                 "rewrite_cv": f"{API_PREFIX}/rewriting/rewrite",
                 "compile_pdf": f"{API_PREFIX}/pdf/compile",
                 "generate_cv": f"{API_PREFIX}/generation/generate",
+                "semantic_matching": f"{API_PREFIX}/semantic-matching/match",
+                "optimize_cv": f"{API_PREFIX}/semantic-matching/optimize",
+                "full_report": f"{API_PREFIX}/semantic-matching/full-report",
                 "health": "/health"
             }
         }
