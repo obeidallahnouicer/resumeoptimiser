@@ -23,12 +23,12 @@ def compile_latex_to_pdf(
     """
     ensure_build_dir()
 
-    # Write LaTeX to file
+    # Write LaTeX to file with UTF-8 encoding
     latex_file = BUILD_DIR / f"{output_name}.tex"
-    latex_file.write_text(latex_content)
+    latex_file.write_text(latex_content, encoding='utf-8')
 
     try:
-        # Run pdflatex
+        # Run pdflatex with UTF-8 support
         result = subprocess.run(
             [
                 "pdflatex",
@@ -37,12 +37,21 @@ def compile_latex_to_pdf(
                 str(latex_file)
             ],
             capture_output=True,
-            text=True,
-            timeout=LATEX_TIMEOUT
+            timeout=LATEX_TIMEOUT,
+            env={**dict(__import__('os').environ), 'LC_ALL': 'C.UTF-8', 'LANG': 'C.UTF-8'}  # Set UTF-8 locale
         )
 
+        # Decode output with error handling for non-UTF-8 bytes
+        stderr = result.stderr.decode('utf-8', errors='ignore') if result.stderr else ""
+        stdout = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
+
         if result.returncode != 0:
-            return False, "", result.stderr or result.stdout
+            # Check if PDF was still generated despite errors
+            pdf_path = BUILD_DIR / f"{output_name}.pdf"
+            if pdf_path.exists():
+                # pdflatex sometimes returns non-zero even when PDF is generated
+                return True, str(pdf_path), ""
+            return False, "", stderr or stdout
 
         pdf_path = BUILD_DIR / f"{output_name}.pdf"
         if pdf_path.exists():
