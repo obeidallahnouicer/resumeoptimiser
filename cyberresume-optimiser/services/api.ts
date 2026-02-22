@@ -1,4 +1,9 @@
-import { GenerationResponse } from '../types';
+import { 
+  GenerationResponse, 
+  SemanticMatchResult, 
+  SemanticCVReport, 
+  CVOptimizationResult 
+} from '../types';
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000/api/v1';
 const API_TIMEOUT = Number.parseInt((import.meta as any).env?.VITE_API_TIMEOUT || '60000', 10);
@@ -181,3 +186,278 @@ export const downloadPDF = async (pdfPath: string | null) => {
     alert(`Failed to download PDF: ${errorMsg}`);
   }
 };
+
+// ============= SEMANTIC MATCHING API FUNCTIONS =============
+
+/**
+ * Perform semantic CV to JD matching
+ */
+export const semanticMatch = async (
+  cvFile: File,
+  jdText: string,
+  profileFile?: File
+): Promise<SemanticMatchResult> => {
+  if (ENABLE_MOCK) {
+    console.log("Mock mode enabled for semantic matching");
+    await delay(3000);
+    return generateMockSemanticMatch();
+  }
+
+  try {
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('cv_file', cvFile);
+    formData.append('job_description_text', jdText);
+    if (profileFile) {
+      formData.append('profile_file', profileFile);
+    }
+
+    const response = await fetchWithTimeout(
+      `${API_URL}/semantic-matching/match`,
+      {
+        method: 'POST',
+        body: formData
+      },
+      API_TIMEOUT
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `API Error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.warn("Semantic matching failed:", errorMsg);
+    throw error;
+  }
+};
+
+/**
+ * SMART: Perform semantic CV to JD matching with LLM preprocessing
+ * 
+ * This uses LLM to intelligently parse the job description before matching,
+ * resulting in much better gap analysis and recommendations.
+ */
+export const semanticMatchSmart = async (
+  cvFile: File,
+  jdText: string,
+  profileFile?: File
+): Promise<SemanticMatchResult> => {
+  if (ENABLE_MOCK) {
+    console.log("Mock mode enabled for smart semantic matching");
+    await delay(4000); // Takes a bit longer due to LLM processing
+    return generateMockSemanticMatch();
+  }
+
+  try {
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('cv_file', cvFile);
+    formData.append('job_description_text', jdText);
+    if (profileFile) {
+      formData.append('profile_file', profileFile);
+    }
+
+    console.log("🧠 Calling smart semantic matching with LLM preprocessing...");
+    const response = await fetchWithTimeout(
+      `${API_URL}/semantic-matching/match-smart`,
+      {
+        method: 'POST',
+        body: formData
+      },
+      API_TIMEOUT + 10000 // Extra timeout for LLM processing
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `API Error: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log("✅ Smart matching complete:", result);
+    return result;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.warn("Smart semantic matching failed:", errorMsg);
+    throw error;
+  }
+};
+
+/**
+ * Optimize CV based on job description
+ */
+export const optimizeCV = async (
+  cvFile: File,
+  jdText: string,
+  profileFile?: File
+): Promise<CVOptimizationResult> => {
+  if (ENABLE_MOCK) {
+    console.log("Mock mode enabled for CV optimization");
+    await delay(4000);
+    return generateMockOptimization();
+  }
+
+  try {
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('cv_file', cvFile);
+    formData.append('job_description_text', jdText);
+    if (profileFile) {
+      formData.append('profile_file', profileFile);
+    }
+    formData.append('apply_optimizations', 'true');
+
+    const response = await fetchWithTimeout(
+      `${API_URL}/semantic-matching/optimize`,
+      {
+        method: 'POST',
+        body: formData
+      },
+      API_TIMEOUT
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `API Error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.warn("CV optimization failed:", errorMsg);
+    throw error;
+  }
+};
+
+/**
+ * Generate full semantic CV report
+ */
+export const generateFullReport = async (
+  cvFile: File,
+  jdText: string,
+  profileFile?: File,
+  applyOptimizations: boolean = false
+): Promise<SemanticCVReport> => {
+  if (ENABLE_MOCK) {
+    console.log("Mock mode enabled for full report");
+    await delay(5000);
+    return generateMockFullReport();
+  }
+
+  try {
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('cv_file', cvFile);
+    formData.append('job_description_text', jdText);
+    if (profileFile) {
+      formData.append('profile_file', profileFile);
+    }
+    formData.append('apply_optimizations', String(applyOptimizations));
+
+    const response = await fetchWithTimeout(
+      `${API_URL}/semantic-matching/full-report`,
+      {
+        method: 'POST',
+        body: formData
+      },
+      API_TIMEOUT
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `API Error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.warn("Full report generation failed:", errorMsg);
+    throw error;
+  }
+};
+
+// ============= MOCK DATA GENERATORS =============
+
+function generateMockSemanticMatch(): SemanticMatchResult {
+  return {
+    overall_score: 0.78,
+    confidence: 'strong',
+    section_scores: {
+      skills: { similarity: 0.82, matched_count: 12, total_required: 15 },
+      experience: { similarity: 0.75, years_match: 8, required_years: 5 },
+      education: { similarity: 0.70, relevant_degrees: 1 }
+    },
+    skill_match_ratio: 0.8,
+    gaps: [
+      {
+        gap_id: 'gap_001',
+        requirement: 'Kubernetes orchestration',
+        gap_type: 'skill_gap',
+        severity: 'high',
+        similarity: 0.45,
+        closest_match: 'Docker containerization',
+        suggested_improvement: 'Add Kubernetes experience or emphasize container orchestration work',
+        source: 'job_description'
+      },
+      {
+        gap_id: 'gap_002',
+        requirement: '5+ years backend development',
+        gap_type: 'wording_gap',
+        severity: 'moderate',
+        similarity: 0.65,
+        closest_match: 'Backend development experience',
+        suggested_improvement: 'Emphasize years of backend work and mention scale of systems',
+        source: 'job_description'
+      }
+    ],
+    critical_gaps: 1,
+    recommendations: [
+      '✓ Strong match - Ready to apply',
+      '🟠 Address 1 critical skill gap (Kubernetes)',
+      'Consider adding cloud orchestration experience'
+    ]
+  };
+}
+
+function generateMockOptimization(): CVOptimizationResult {
+  return {
+    original_score: 0.78,
+    optimized_score: 0.87,
+    improvement_delta: 0.09,
+    improvements_made: [
+      'Reworded backend experience to emphasize scalable systems',
+      'Added quantified metrics for performance improvements',
+      'Highlighted cloud deployment experience for AWS skills',
+      'Reorganized skills section for better ATS matching'
+    ],
+    optimized_sections: {
+      skills: 'Python • Java • AWS • Docker • PostgreSQL • React • TypeScript • Kubernetes',
+      experience:
+        'Senior Backend Engineer | TechCorp | 2019-Present\n' +
+        '• Architected microservices platform serving 1M+ requests/day\n' +
+        '• Reduced API latency by 40% through async optimization\n' +
+        '• Deployed containerized services on AWS ECS and Kubernetes\n' +
+        '• Led team of 4 engineers in cloud migration project'
+    },
+    warnings: [],
+    compliance_check: {
+      no_hallucination: true,
+      uses_profile_data: false,
+      jd_aligned: true
+    }
+  };
+}
+
+function generateMockFullReport(): SemanticCVReport {
+  return {
+    matching_result: generateMockSemanticMatch(),
+    optimization_result: generateMockOptimization(),
+    analysis_timestamp: new Date().toISOString(),
+    summary:
+      'CV-JD Alignment: 78% (strong). Identified 2 gaps (1 critical). ' +
+      'After optimization: 87% (+9%). Recommendations: Build Kubernetes skills, ' +
+      'Add deployment experience.'
+  };
+}
