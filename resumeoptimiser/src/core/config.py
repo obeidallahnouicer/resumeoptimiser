@@ -43,7 +43,7 @@ OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "Resume Optimiser")
 # NVIDIA API Configuration
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "deepseek-ai/deepseek-v3.1")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "deepseek-ai/deepseek-r1-distill-qwen-14b")
 
 # CORS Configuration
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
