@@ -34,6 +34,8 @@ import { GenerationResponse } from './types';
 import { GlitchText } from './components/GlitchText';
 import { ScoreGauge } from './components/ScoreGauge';
 import { TerminalLog } from './components/TerminalLog';
+import { SemanticMatchingPanel } from './components/SemanticMatchingPanel';
+import { CVRewriterPanel } from './components/CVRewriterPanel';
 
 // --- Background Component ---
 const CyberBackground = () => (
@@ -59,6 +61,7 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<GenerationResponse | null>(null);
+  const [activeTab, setActiveTab] = useState<'optimizer' | 'semantic' | 'rewriter'>('optimizer');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -139,8 +142,86 @@ function App() {
           </div>
         </header>
 
+        {/* Tab Navigation */}
+        <div className="flex gap-4 mb-8 border-b border-gray-800">
+          <motion.button
+            onClick={() => setActiveTab('optimizer')}
+            className={`px-6 py-3 font-mono text-sm font-bold transition-all relative ${
+              activeTab === 'optimizer'
+                ? 'text-cyber-green'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            CV_OPTIMIZER
+            {activeTab === 'optimizer' && (
+              <motion.div
+                layoutId="underline"
+                className="absolute bottom-0 left-0 right-0 h-1 bg-cyber-green"
+              />
+            )}
+          </motion.button>
+          <motion.button
+            onClick={() => setActiveTab('semantic')}
+            className={`px-6 py-3 font-mono text-sm font-bold transition-all relative ${
+              activeTab === 'semantic'
+                ? 'text-cyber-cyan'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            SEMANTIC_MATCHING
+            {activeTab === 'semantic' && (
+              <motion.div
+                layoutId="underline"
+                className="absolute bottom-0 left-0 right-0 h-1 bg-cyber-cyan"
+              />
+            )}
+          </motion.button>
+          <motion.button
+            onClick={() => setActiveTab('rewriter')}
+            className={`px-6 py-3 font-mono text-sm font-bold transition-all relative ${
+              activeTab === 'rewriter'
+                ? 'text-amber-400'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            CV_REWRITER
+            {activeTab === 'rewriter' && (
+              <motion.div
+                layoutId="underline"
+                className="absolute bottom-0 left-0 right-0 h-1 bg-amber-400"
+              />
+            )}
+          </motion.button>
+        </div>
+
         <AnimatePresence mode="wait">
-          {!data && !loading ? (
+          {activeTab === 'rewriter' ? (
+            /* --- CV REWRITER TAB --- */
+            <motion.div
+              key="rewriter"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <CVRewriterPanel />
+            </motion.div>
+          ) : activeTab === 'semantic' ? (
+            /* --- SEMANTIC MATCHING TAB --- */
+            <motion.div
+              key="semantic"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <SemanticMatchingPanel />
+            </motion.div>
+          ) : (!data && !loading) ? (
             /* --- INPUT VIEW --- */
             <motion.div 
               key="input"
