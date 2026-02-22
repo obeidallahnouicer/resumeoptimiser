@@ -3,11 +3,21 @@
 import json
 import numpy as np
 from typing import Dict, List, Optional, Tuple
+from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 from src.models.schemas import SkillMatchResult, SkillMatch, MatchStatus, BaseSkillsData, ParsedJobDescription
-from src.core.config import BASE_SKILLS_FILE, MIN_TRANSFERABLE_SIMILARITY, MIN_DIRECT_SIMILARITY
+from src.core.config import BASE_SKILLS_FILE, MIN_TRANSFERABLE_SIMILARITY, MIN_DIRECT_SIMILARITY, EMBEDDING_MODEL
+
+# Initialize the embedding model
+_embedding_model = None
+
+def get_embedding_model():
+    """Get or initialize the embedding model (lazy loading)."""
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+    return _embedding_model
 
 
 def load_base_skills(filepath: str = str(BASE_SKILLS_FILE)) -> BaseSkillsData:
@@ -31,7 +41,7 @@ def load_base_skills(filepath: str = str(BASE_SKILLS_FILE)) -> BaseSkillsData:
 
 def compute_skill_embeddings(skills_list: List[str]) -> Dict[str, np.ndarray]:
     """
-    Compute TF-IDF embeddings for skills.
+    Compute embeddings for skills using BGE model.
     
     Args:
         skills_list: List of skill names
@@ -39,12 +49,12 @@ def compute_skill_embeddings(skills_list: List[str]) -> Dict[str, np.ndarray]:
     Returns:
         Dictionary mapping skill names to embedding vectors
     """
-    if len(skills_list) < 2:
-        return {skill: np.array([]) for skill in skills_list}
+    if len(skills_list) == 0:
+        return {}
     
-    vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 3))
-    embeddings = vectorizer.fit_transform(skills_list)
-    return {skill: embeddings[i].toarray().flatten() for i, skill in enumerate(skills_list)}
+    model = get_embedding_model()
+    embeddings = model.encode(skills_list, convert_to_numpy=True)
+    return {skill: embeddings[i] for i, skill in enumerate(skills_list)}
 
 
 def cosine_similarity_score(vec1: np.ndarray, vec2: np.ndarray) -> float:
