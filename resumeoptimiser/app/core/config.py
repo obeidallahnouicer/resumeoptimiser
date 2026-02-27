@@ -7,15 +7,25 @@ No global state – instantiated once and injected via dependency injection.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Absolute path to the .env file so it is found regardless of the working
+# directory from which uvicorn is launched.
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class LLMSettings(BaseSettings):
     """Settings scoped to the LLM provider."""
 
-    model_config = SettingsConfigDict(env_prefix="LLM_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="LLM_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     provider: str = Field(default="nvidia")
     base_url: str = Field(default="https://integrate.api.nvidia.com/v1")
@@ -29,7 +39,12 @@ class LLMSettings(BaseSettings):
 class EmbeddingSettings(BaseSettings):
     """Settings scoped to the embedding model."""
 
-    model_config = SettingsConfigDict(env_prefix="EMBEDDING_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EMBEDDING_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
     device: str = Field(default="cpu")
@@ -38,7 +53,11 @@ class EmbeddingSettings(BaseSettings):
 class DatabaseSettings(BaseSettings):
     """Settings scoped to the database."""
 
-    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     database_url: str = Field(default="postgresql://localhost/resumeoptimiser")
 
@@ -47,7 +66,7 @@ class AppSettings(BaseSettings):
     """Top-level application settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
     )
