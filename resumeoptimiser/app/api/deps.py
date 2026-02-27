@@ -2,13 +2,14 @@
 
 All service-level dependencies are constructed here and injected
 into route handlers. No business logic lives here – only wiring.
+
+The LLM client and embedding client are module-level singletons so that
+the SentenceTransformer model is loaded exactly once at startup and reused
+across every request, avoiding the meta-tensor error caused by concurrent
+model initialisation.
 """
 
 from __future__ import annotations
-
-from functools import lru_cache
-
-from fastapi import Depends
 
 from app.agents.cv_parser import CVParserAgent
 from app.agents.cv_rewriter import CVRewriteAgent
@@ -23,35 +24,34 @@ from app.infrastructure.embedding_client import SentenceTransformerEmbeddingClie
 from app.infrastructure.llm_client import OpenAILLMClient
 from app.services.optimization_service import OptimizationService
 
+# ---------------------------------------------------------------------------
+# Module-level singletons – created once when the module is first imported
+# (i.e. at server startup) and reused for the lifetime of the process.
+# ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
-def get_llm_client(settings: AppSettings = Depends(get_settings)) -> OpenAILLMClient:
-    return OpenAILLMClient(settings.llm)
+_settings = get_settings()
+_llm_client = OpenAILLMClient(_settings.llm)
+_embedding_client = SentenceTransformerEmbeddingClient(_settings.embedding)
+
+_matcher_agent = SemanticMatcherAgent(embedding_client=_embedding_client)
+
+_optimization_service = OptimizationService(
+    cv_parser=CVParserAgent(llm=_llm_client),
+    job_normalizer=JobNormalizerAgent(llm=_llm_client),
+    matcher=_matcher_agent,
+    explainer=ScoreExplainerAgent(llm=_llm_client),
+    rewriter=CVRewriteAgent(llm=_llm_client),
+    validator=CVValidatorAgent(),
+    rescorer=RescoreAgent(matcher=_matcher_agent),
+    report_generator=ReportGeneratorAgent(llm=_llm_client),
+)
 
 
-@lru_cache(maxsize=1)
-def get_embedding_client(
-    settings: AppSettings = Depends(get_settings),
-) -> SentenceTransformerEmbeddingClient:
-    return SentenceTransformerEmbeddingClient(settings.embedding)
+# ---------------------------------------------------------------------------
+# FastAPI dependency functions – return the singletons
+# ---------------------------------------------------------------------------
 
 
-def get_optimization_service(
-    settings: AppSettings = Depends(get_settings),
-) -> OptimizationService:
-    """Build the full agent pipeline and return an OptimizationService."""
-    llm = OpenAILLMClient(settings.llm)
-    embedder = SentenceTransformerEmbeddingClient(settings.embedding)
-
-    matcher = SemanticMatcherAgent(embedding_client=embedder)
-
-    return OptimizationService(
-        cv_parser=CVParserAgent(llm=llm),
-        job_normalizer=JobNormalizerAgent(llm=llm),
-        matcher=matcher,
-        explainer=ScoreExplainerAgent(llm=llm),
-        rewriter=CVRewriteAgent(llm=llm),
-        validator=CVValidatorAgent(),
-        rescorer=RescoreAgent(matcher=matcher),
-        report_generator=ReportGeneratorAgent(llm=llm),
-    )
+def get_optimization_service() -> OptimizationService:
+    """Return the shared OptimizationService singleton."""
+    return _optimization_service
