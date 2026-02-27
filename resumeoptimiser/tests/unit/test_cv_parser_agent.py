@@ -123,7 +123,7 @@ class TestCVParserAgent:
         mock_llm.complete.return_value = payload
         agent = CVParserAgent(llm=mock_llm)
 
-        result = agent.execute(CVParserInput(raw_text="Bob's CV"))
+        result = agent.execute(CVParserInput(raw_text="Bob Smith's full CV document"))
 
         assert result.contact.linkedin == "linkedin.com/in/bob"
         assert result.contact.github == "github.com/bob"
@@ -133,6 +133,6 @@ class TestCVParserAgent:
         mock_llm.complete.return_value = _make_valid_cv_json()
         agent = CVParserAgent(llm=mock_llm)
 
-        agent.execute(CVParserInput(raw_text="CV text"))
+        agent.execute(CVParserInput(raw_text="CV text content here"))
 
         assert mock_llm.complete.call_count == 1

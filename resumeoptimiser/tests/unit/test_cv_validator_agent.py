@@ -51,7 +51,14 @@ class TestCVValidatorAgent:
 
     def test_missing_email_fails_validation(self, structured_cv):
         """A CV with an empty contact email must fail validation."""
-        optimized = _make_optimized_cv(email="")
+        # Use model_construct() to bypass Pydantic field validators so the
+        # agent's own business rules are what's under test here.
+        contact = ContactInfoSchema.model_construct(name="Jane", email="")
+        optimized = OptimizedCVSchema.model_construct(
+            contact=contact,
+            sections=_make_optimized_cv().sections,
+            changes_summary=[],
+        )
         agent = CVValidatorAgent()
 
         result = agent.execute(CVValidatorInput(original=structured_cv, optimized=optimized))
@@ -77,11 +84,19 @@ class TestCVValidatorAgent:
 
     def test_empty_section_fails_validation(self, structured_cv):
         """A section with empty raw_text after rewriting must fail."""
-        sections = [
-            CVSectionSchema(section_type="experience", raw_text="", items=[]),
-            CVSectionSchema(section_type="skills", raw_text="Python", items=["Python"]),
-        ]
-        optimized = _make_optimized_cv(sections=sections)
+        # Use model_construct() to bypass Pydantic's min_length=1 constraint
+        # so the agent's own rule (empty section body) is what's tested.
+        empty_section = CVSectionSchema.model_construct(
+            section_type="experience", raw_text="", items=[]
+        )
+        skills_section = CVSectionSchema(
+            section_type="skills", raw_text="Python", items=["Python"]
+        )
+        optimized = OptimizedCVSchema.model_construct(
+            contact=_make_optimized_cv().contact,
+            sections=[empty_section, skills_section],
+            changes_summary=[],
+        )
         agent = CVValidatorAgent()
 
         result = agent.execute(CVValidatorInput(original=structured_cv, optimized=optimized))
