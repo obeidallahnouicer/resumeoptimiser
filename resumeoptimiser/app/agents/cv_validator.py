@@ -74,15 +74,19 @@ class CVValidatorAgent(BaseAgent[CVValidatorInput, CVValidatorOutput]):
             return ["Contact email is missing."]
         return []
 
+    def _section_type_str(self, section_type: object) -> str:
+        """Return the string value of a section_type whether it's an enum or a plain str."""
+        return section_type.value if hasattr(section_type, "value") else str(section_type)
+
     def _check_required_sections(self, cv: OptimizedCVSchema) -> list[str]:
-        types = {s.section_type.value for s in cv.sections}
+        types = {self._section_type_str(s.section_type) for s in cv.sections}
         if not types.intersection({"experience", "skills"}):
             return ["CV must contain at least one 'experience' or 'skills' section."]
         return []
 
     def _check_no_empty_sections(self, cv: OptimizedCVSchema) -> list[str]:
         return [
-            f"Section '{s.section_type.value}' is empty after rewriting."
+            f"Section '{self._section_type_str(s.section_type)}' is empty after rewriting."
             for s in cv.sections
             if not s.raw_text.strip()
         ]
@@ -99,6 +103,6 @@ class CVValidatorAgent(BaseAgent[CVValidatorInput, CVValidatorOutput]):
             orig_len = orig_map.get(section.section_type, 0)
             if orig_len > 0 and len(section.raw_text) < orig_len * 0.5:
                 violations.append(
-                    f"Section '{section.section_type.value}' shrank by more than 50%."
+                    f"Section '{self._section_type_str(section.section_type)}' shrank by more than 50%."
                 )
         return violations
