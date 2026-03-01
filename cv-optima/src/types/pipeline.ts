@@ -52,6 +52,15 @@ export interface StructuredCV {
   contact: ContactInfo;
   sections: CVSection[];
   raw_text: string;
+  // enriched fields
+  detected_language?: string;
+  hard_skills?: string[];
+  soft_skills?: string[];
+  tools?: string[];
+  languages_spoken?: string[];
+  total_years_experience?: number;
+  education_level?: string;
+  certifications?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +80,17 @@ export interface StructuredJob {
   responsibilities: string[];
   qualifications: string[];
   raw_text: string;
+  // enriched fields
+  detected_language?: string;
+  hard_skills?: string[];
+  soft_skills?: string[];
+  tools?: string[];
+  languages_required?: string[];
+  min_years_experience?: number;
+  education_level?: string;
+  certifications_preferred?: string[];
+  methodologies?: string[];
+  domain?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,9 +102,29 @@ export interface SectionScore {
   score: number; // 0.0 – 1.0
 }
 
+export interface SkillMatch {
+  skill: string;
+  found_in_cv: boolean;
+  cv_evidence: string;
+}
+
+export interface LLMMatchAnalysis {
+  skills_match_score: number;
+  experience_match_score: number;
+  education_match_score: number;
+  languages_match_score: number;
+  overall_llm_score: number;
+  skill_details: SkillMatch[];
+  strengths: string[];
+  gaps: string[];
+  reasoning: string;
+}
+
 export interface SimilarityScore {
   overall: number; // 0.0 – 1.0
   section_scores: SectionScore[];
+  llm_analysis?: LLMMatchAnalysis | null;
+  embedding_score?: number;
 }
 
 // ---------------------------------------------------------------------------
