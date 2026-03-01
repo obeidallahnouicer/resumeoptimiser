@@ -29,10 +29,10 @@ class LLMSettings(BaseSettings):
 
     provider: str = Field(default="nvidia")
     base_url: str = Field(default="https://integrate.api.nvidia.com/v1")
-    model: str = Field(default="deepseek-ai/deepseek-r1-distill-qwen-32b")
+    model: str = Field(default="openai/gpt-oss-120b")
     api_key: str = Field(default="")
-    temperature: float = Field(default=0.6, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.7, ge=0.0, le=1.0)
+    temperature: float = Field(default=1.0, ge=0.0, le=2.0)
+    top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_tokens: int = Field(default=4096, gt=0)
 
 
@@ -46,7 +46,7 @@ class EmbeddingSettings(BaseSettings):
         extra="ignore",
     )
 
-    model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
+    model: str = Field(default="BAAI/bge-base-en-v1.5")
     device: str = Field(default="cpu")
 
 
