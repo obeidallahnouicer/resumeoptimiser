@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ToggleLeft, ToggleRight, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { usePipeline } from '../../context/PipelineContext';
 import { rewriteCV, ApiError } from '../../api';
@@ -11,12 +11,15 @@ export function RewriteStage({ onComplete }: RewriteStageProps) {
   const [loading, setLoading] = useState(!optimizedCV);
   const [errorMsg, setErrorMsg] = useState('');
   const [showDiff, setShowDiff] = useState(false);
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (optimizedCV) { setLoading(false); return; }
     if (!structuredCV || !structuredJob || !explanationReport) {
       setErrorMsg('Missing pipeline data.'); setLoading(false); return;
     }
+    if (calledRef.current) return;
+    calledRef.current = true;
     (async () => {
       try {
         const result = await rewriteCV({ cv: structuredCV, job: structuredJob, explanation: explanationReport });
@@ -26,7 +29,7 @@ export function RewriteStage({ onComplete }: RewriteStageProps) {
         setErrorMsg(msg); setError(msg);
       } finally { setLoading(false); }
     })();
-  }, []); // eslint-disable-line
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return (
     <div className="flex flex-col items-center gap-4">
