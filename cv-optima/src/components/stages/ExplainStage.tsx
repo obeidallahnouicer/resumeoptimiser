@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { InsightCard } from '../ui/InsightCard';
 import { Loader2, AlertCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
 import { explainMismatches, ApiError } from '../../api';
 
@@ -11,12 +11,15 @@ export function ExplainStage({ onComplete }: ExplainStageProps) {
   const { structuredCV, structuredJob, similarityScore, explanationReport, setExplanationReport, setError } = usePipeline();
   const [loading, setLoading] = useState(!explanationReport);
   const [errorMsg, setErrorMsg] = useState('');
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (explanationReport) { setLoading(false); return; }
     if (!structuredCV || !structuredJob || !similarityScore) {
       setErrorMsg('Missing pipeline data.'); setLoading(false); return;
     }
+    if (calledRef.current) return;
+    calledRef.current = true;
     (async () => {
       try {
         const report = await explainMismatches({ cv: structuredCV, job: structuredJob, score: similarityScore });
@@ -26,7 +29,7 @@ export function ExplainStage({ onComplete }: ExplainStageProps) {
         setErrorMsg(msg); setError(msg);
       } finally { setLoading(false); }
     })();
-  }, []); // eslint-disable-line
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return (
     <div className="flex flex-col items-center gap-4">
