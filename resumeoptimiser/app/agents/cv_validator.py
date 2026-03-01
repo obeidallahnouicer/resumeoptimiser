@@ -3,7 +3,6 @@
 No LLM usage. Pure rule-based validation.
 
 Rules:
-- Contact email must be present.
 - At least one experience or skills section must exist.
 - No section may be empty after rewriting.
 - Rewritten text must not be shorter than 50% of original (hallucination guard).
@@ -63,16 +62,10 @@ class CVValidatorAgent(BaseAgent[CVValidatorInput, CVValidatorOutput]):
     def _collect_violations(self, input: CVValidatorInput) -> list[str]:  # noqa: A002
         """Run all rule checks and return a list of violation messages."""
         violations: list[str] = []
-        violations.extend(self._check_contact(input.optimized))
         violations.extend(self._check_required_sections(input.optimized))
         violations.extend(self._check_no_empty_sections(input.optimized))
         violations.extend(self._check_no_drastic_shrinkage(input.original, input.optimized))
         return violations
-
-    def _check_contact(self, cv: OptimizedCVSchema) -> list[str]:
-        if not cv.contact.email:
-            return ["Contact email is missing."]
-        return []
 
     def _section_type_str(self, section_type: object) -> str:
         """Return the string value of a section_type whether it's an enum or a plain str."""
