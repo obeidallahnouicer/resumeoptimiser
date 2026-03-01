@@ -12,11 +12,38 @@ class SectionScoreSchema(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
 
 
+# ── LLM-powered match analysis (new pre-semantic layer) ──────────
+
+class SkillMatchSchema(BaseModel):
+    skill: str
+    found_in_cv: bool = False
+    cv_evidence: str = Field(default="", description="Where/how it was found in the CV")
+
+
+class LLMMatchAnalysisSchema(BaseModel):
+    """Output of the LLMMatchAnalyzer — field-by-field CV↔Job comparison."""
+
+    skills_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    experience_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    education_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    languages_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    overall_llm_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    skill_details: list[SkillMatchSchema] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    reasoning: str = Field(default="")
+
+
 class SimilarityScoreSchema(BaseModel):
     """Output schema returned by SemanticMatcherAgent."""
 
     overall: float = Field(ge=0.0, le=1.0)
     section_scores: list[SectionScoreSchema] = Field(default_factory=list)
+
+    # ── Enriched with LLM analysis ──
+    llm_analysis: LLMMatchAnalysisSchema | None = Field(default=None)
+    embedding_score: float = Field(default=0.0, ge=0.0, le=1.0,
+                                    description="Pure cosine-similarity score before LLM blending")
 
 
 class SemanticMatcherInput(BaseModel):
