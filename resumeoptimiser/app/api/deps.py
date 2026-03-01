@@ -15,6 +15,7 @@ from app.agents.cv_parser import CVParserAgent
 from app.agents.cv_rewriter import CVRewriteAgent
 from app.agents.cv_validator import CVValidatorAgent
 from app.agents.job_normalizer import JobNormalizerAgent
+from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
 from app.agents.report_generator import ReportGeneratorAgent
 from app.agents.rescorer import RescoreAgent
 from app.agents.score_explainer import ScoreExplainerAgent
@@ -34,15 +35,18 @@ _llm_client = OpenAILLMClient(_settings.llm)
 _embedding_client = SentenceTransformerEmbeddingClient(_settings.embedding)
 
 _matcher_agent = SemanticMatcherAgent(embedding_client=_embedding_client)
+_llm_match_analyzer = LLMMatchAnalyzerAgent(llm=_llm_client)
+_rescorer_agent = RescoreAgent(matcher=_matcher_agent, llm_match_analyzer=_llm_match_analyzer)
 
 _optimization_service = OptimizationService(
     cv_parser=CVParserAgent(llm=_llm_client),
     job_normalizer=JobNormalizerAgent(llm=_llm_client),
     matcher=_matcher_agent,
+    llm_match_analyzer=_llm_match_analyzer,
     explainer=ScoreExplainerAgent(llm=_llm_client),
     rewriter=CVRewriteAgent(llm=_llm_client),
     validator=CVValidatorAgent(),
-    rescorer=RescoreAgent(matcher=_matcher_agent),
+    rescorer=_rescorer_agent,
     report_generator=ReportGeneratorAgent(llm=_llm_client),
 )
 
