@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { CheckCircle2, Briefcase, GraduationCap, Code2, Loader2, AlertCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
 import { parseCv, normalizeJob, ApiError } from '../../api';
 
@@ -14,9 +14,12 @@ export function ParseStage({ onComplete }: ParseStageProps) {
   const { cvText, jobText, structuredCV, structuredJob, setStructuredCV, setStructuredJob, setError } = usePipeline();
   const [loading, setLoading] = useState(!structuredCV);
   const [errorMsg, setErrorMsg] = useState('');
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (structuredCV && structuredJob) { setLoading(false); return; }
+    if (calledRef.current) return;
+    calledRef.current = true;
     (async () => {
       try {
         const [cv, job] = await Promise.all([parseCv(cvText), normalizeJob(jobText)]);
