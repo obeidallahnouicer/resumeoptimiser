@@ -141,7 +141,7 @@ def normalize_job(
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 – Match (embeddings only)
+# Stage 4 – Match (embeddings + LLM analysis)
 # ---------------------------------------------------------------------------
 
 
@@ -150,7 +150,7 @@ def match(
     body: SemanticMatcherInput,
     service: OptimizationService = Depends(get_optimization_service),
 ) -> SimilarityScoreSchema:
-    """Run SemanticMatcherAgent. No LLM – pure cosine similarity."""
+    """Run SemanticMatcherAgent + LLMMatchAnalyzerAgent. Returns blended score."""
     try:
         return service._score(body.cv, body.job)  # noqa: SLF001
     except AppError as exc:
@@ -211,8 +211,6 @@ def compare(
     service: OptimizationService = Depends(get_optimization_service),
 ) -> ComparisonReportSchema:
     """Run RescoreAgent + ReportGeneratorAgent. Returns full comparison."""
-    from app.agents.rescorer import RescoreInput
-
     try:
         improved_score = service._rescore(  # noqa: SLF001
             body.original_cv,
