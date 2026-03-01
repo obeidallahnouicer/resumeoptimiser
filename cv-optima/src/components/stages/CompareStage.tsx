@@ -1,10 +1,11 @@
 import { motion } from 'motion/react';
 import { ArrowUpRight, Download, Loader2, AlertCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
 import { compareResults, ApiError } from '../../api';
+import { exportOptimizedCvToPdf } from '../../lib/exportPdf';
 
-interface CompareStageProps { onReset?: () => void; }
+interface CompareStageProps { readonly onReset?: () => void; }
 
 export function CompareStage({ onReset }: CompareStageProps) {
   const {
@@ -13,12 +14,15 @@ export function CompareStage({ onReset }: CompareStageProps) {
   } = usePipeline();
   const [loading, setLoading] = useState(!comparisonReport);
   const [errorMsg, setErrorMsg] = useState('');
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (comparisonReport) { setLoading(false); return; }
     if (!structuredCV || !structuredJob || !similarityScore || !explanationReport || !optimizedCV) {
       setErrorMsg('Missing pipeline data.'); setLoading(false); return;
     }
+    if (calledRef.current) return;
+    calledRef.current = true;
     const optimizedAsStructured = { ...structuredCV, sections: optimizedCV.sections, contact: optimizedCV.contact };
     (async () => {
       try {
@@ -36,7 +40,7 @@ export function CompareStage({ onReset }: CompareStageProps) {
         setErrorMsg(msg); setError(msg);
       } finally { setLoading(false); }
     })();
-  }, []); // eslint-disable-line
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return (
     <div className="flex flex-col items-center gap-4">
@@ -55,6 +59,13 @@ export function CompareStage({ onReset }: CompareStageProps) {
   const after = comparisonReport?.improved_score.after.overall ?? 0;
   const delta = comparisonReport?.improved_score.delta ?? 0;
   const changes = comparisonReport?.optimized_cv.changes_summary ?? [];
+
+  const handleDownloadPdf = () => {
+    if (!comparisonReport) return;
+    const cv = comparisonReport.optimized_cv;
+    const name = cv.contact?.name?.trim().replaceAll(' ', '-') || 'candidate';
+    exportOptimizedCvToPdf(cv, `${name}-optimized-cv.pdf`);
+  };
 
   const metrics = [
     { label: 'Match Before', value: `${Math.round(before * 100)}%`, diff: null },
@@ -94,8 +105,8 @@ export function CompareStage({ onReset }: CompareStageProps) {
         <div className="mb-10 bg-bg-card border border-border rounded-2xl p-6">
           <h3 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">Changes Made</h3>
           <ul className="space-y-2">
-            {changes.map((c, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-text-primary">
+            {changes.map((c) => (
+              <li key={c} className="flex items-start gap-2 text-sm text-text-primary">
                 <span className="text-success mt-0.5">✓</span>{c}
               </li>
             ))}
@@ -105,6 +116,7 @@ export function CompareStage({ onReset }: CompareStageProps) {
 
       <div className="flex justify-center gap-4">
         <motion.button
+          onClick={handleDownloadPdf}
           className="flex items-center gap-2 px-8 py-4 bg-accent text-bg-primary font-bold rounded-xl hover:bg-white transition-colors shadow-[0_0_30px_var(--color-accent-dim)]"
           whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
           <Download className="w-5 h-5" />Download PDF
