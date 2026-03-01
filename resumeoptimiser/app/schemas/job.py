@@ -23,6 +23,18 @@ class StructuredJobSchema(BaseModel):
     qualifications: list[str] = Field(default_factory=list)
     raw_text: str = ""
 
+    # ── Enriched fields (populated by the improved normalizer) ──────
+    detected_language: str = Field(default="en", description="ISO 639-1 code: en, fr, …")
+    hard_skills: list[str] = Field(default_factory=list)
+    soft_skills: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    languages_required: list[str] = Field(default_factory=list)
+    min_years_experience: float = Field(default=0.0)
+    education_level: str = Field(default="", description="e.g. bachelor, master, phd, diploma, …")
+    certifications_preferred: list[str] = Field(default_factory=list)
+    methodologies: list[str] = Field(default_factory=list)
+    domain: str = Field(default="", description="Industry/domain: finance, IT, healthcare, …")
+
 
 class JobNormalizerInput(BaseModel):
     """Input schema for JobNormalizerAgent."""
