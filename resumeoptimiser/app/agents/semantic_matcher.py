@@ -2,12 +2,12 @@
 
 Constraint: NO LLM usage. Similarity is purely embedding-based.
 
-Algorithm:
-1. Build a single text representation of the job (title + skills + responsibilities).
-2. For each CV section, embed the section text.
-3. Embed the job representation once.
-4. Cosine similarity between each section vector and the job vector.
-5. Weighted average → overall score.
+Algorithm (v2 – enriched fields):
+1. Build rich text from job: title + hard_skills + soft_skills + tools + responsibilities.
+2. Build rich text from CV: per section (as before) PLUS an enriched "skills blob"
+   that concatenates hard_skills + soft_skills + tools for a dedicated skills embedding.
+3. Cosine similarity per section + enriched skills embedding.
+4. Weighted average → overall embedding score.
 """
 
 from __future__ import annotations
@@ -31,10 +31,12 @@ logger = get_logger(__name__)
 
 # Weight each section type for the overall score
 _SECTION_WEIGHTS: dict[str, float] = {
-    "experience": 0.40,
+    "experience": 0.30,
     "skills": 0.30,
     "education": 0.15,
     "summary": 0.10,
+    "certifications": 0.05,
+    "languages": 0.05,
     "other": 0.05,
 }
 _DEFAULT_WEIGHT = 0.05
@@ -43,7 +45,7 @@ _DEFAULT_WEIGHT = 0.05
 class SemanticMatcherAgent(BaseAgent[SemanticMatcherInput, SimilarityScoreSchema]):
     """Scores CV ↔ Job similarity using embeddings only (no LLM)."""
 
-    meta = AgentMeta(name="SemanticMatcherAgent", version="1.0.0")
+    meta = AgentMeta(name="SemanticMatcherAgent", version="2.0.0")
 
     def __init__(self, embedding_client: EmbeddingClientProtocol) -> None:
         self._embedder = embedding_client
@@ -54,6 +56,19 @@ class SemanticMatcherAgent(BaseAgent[SemanticMatcherInput, SimilarityScoreSchema
         try:
             job_vector = self._embed_job(input.job)
             section_scores = self._score_sections(input.cv, job_vector)
+
+            # Only inject the enriched skills blob when no skills section was
+            # produced from CV sections (avoids duplicate "skills" entries).
+            has_skills_section = any(
+                s.section_type.value == "skills" for s in section_scores
+            )
+            if not has_skills_section:
+                skills_score = self._skills_embedding_score(input.cv, input.job)
+                if skills_score is not None:
+                    section_scores.append(
+                        SectionScoreSchema(section_type="skills", score=skills_score)
+                    )
+
             overall = self._compute_overall(section_scores)
         except SimilarityError:
             raise
@@ -61,13 +76,24 @@ class SemanticMatcherAgent(BaseAgent[SemanticMatcherInput, SimilarityScoreSchema
             raise AgentExecutionError(self.meta.name, str(exc)) from exc
 
         logger.info("semantic_matcher.success", overall=overall)
-        return SimilarityScoreSchema(overall=overall, section_scores=section_scores)
+        return SimilarityScoreSchema(
+            overall=overall,
+            section_scores=section_scores,
+            embedding_score=overall,
+        )
 
     def _embed_job(self, job: StructuredJobSchema) -> NDArray[np.float32]:
-        """Build a single job text and embed it."""
-        skills_text = " ".join(s.skill for s in job.required_skills)
-        responsibilities_text = " ".join(job.responsibilities)
-        job_text = f"{job.title} {skills_text} {responsibilities_text}".strip()
+        """Build a rich job text using ALL enriched fields and embed it."""
+        parts = [job.title]
+        parts.extend(s.skill for s in job.required_skills)
+        parts.extend(job.hard_skills)
+        parts.extend(job.soft_skills)
+        parts.extend(job.tools)
+        parts.extend(job.responsibilities)
+        parts.extend(job.methodologies)
+        if job.domain:
+            parts.append(job.domain)
+        job_text = " ".join(p for p in parts if p).strip()
         if not job_text:
             raise SimilarityError("Job description produced empty embedding text.")
         return self._embedder.embed(job_text)
@@ -86,6 +112,24 @@ class SemanticMatcherAgent(BaseAgent[SemanticMatcherInput, SimilarityScoreSchema
             score = float(np.dot(section_vector, job_vector))
             scores.append(SectionScoreSchema(section_type=section.section_type, score=score))
         return scores
+
+    def _skills_embedding_score(
+        self,
+        cv: StructuredCVSchema,
+        job: StructuredJobSchema,
+    ) -> float | None:
+        """Compute a dedicated skills cosine similarity using enriched fields."""
+        cv_skills_text = " ".join(
+            cv.hard_skills + cv.soft_skills + cv.tools
+        ).strip()
+        job_skills_text = " ".join(
+            job.hard_skills + job.soft_skills + job.tools
+        ).strip()
+        if not cv_skills_text or not job_skills_text:
+            return None
+        cv_vec = self._embedder.embed(cv_skills_text)
+        job_vec = self._embedder.embed(job_skills_text)
+        return float(np.dot(cv_vec, job_vec))
 
     def _compute_overall(self, section_scores: list[SectionScoreSchema]) -> float:
         """Compute a weighted average of section scores."""
