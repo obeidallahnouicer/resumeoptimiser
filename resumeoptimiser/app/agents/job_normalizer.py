@@ -99,8 +99,8 @@ output_format:
   Schema:
     {
       "detected_language": "fr|en",
-      "title": "",
-      "company": "",
+      "title": "<job title as stated in the posting>",
+      "company": "<company name or empty string>",
       "employment_type": "full_time|part_time|contract|freelance|internship|unknown",
       "required_skills": [{"skill": "...", "required": true}],
       "responsibilities": ["..."],
@@ -170,6 +170,10 @@ class JobNormalizerAgent(BaseAgent[JobNormalizerInput, StructuredJobSchema]):
             raise JobNormalizationError(f"LLM returned invalid JSON: {exc}") from exc
 
     def _validate_schema(self, data: dict) -> StructuredJobSchema:
+        # Guard against the LLM returning the placeholder or an empty title.
+        title = data.get("title", "").strip()
+        if not title or title.startswith("<"):
+            data["title"] = "Unknown Position"
         try:
             return StructuredJobSchema.model_validate(data)
         except Exception as exc:
