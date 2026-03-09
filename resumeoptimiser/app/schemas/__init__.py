@@ -16,6 +16,15 @@ from app.schemas.pipeline import (
     OptimizeRequest,
     OptimizeResponse,
 )
+from app.schemas.markdown import (
+    MarkdownInput,
+    MarkdownOutput,
+    MarkdownRewriteInput,
+    MarkdownRewriteOutput,
+    MarkdownDiffInput,
+    MarkdownDiffOutput,
+    MarkdownToPdfInput,
+)
 
 __all__ = [
     "CVParserInput",
@@ -37,4 +46,12 @@ __all__ = [
     "ImprovedScoreSchema",
     "OptimizeRequest",
     "OptimizeResponse",
+    # Markdown pipeline
+    "MarkdownInput",
+    "MarkdownOutput",
+    "MarkdownRewriteInput",
+    "MarkdownRewriteOutput",
+    "MarkdownDiffInput",
+    "MarkdownDiffOutput",
+    "MarkdownToPdfInput",
 ]
