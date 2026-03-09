@@ -16,6 +16,8 @@ from app.agents.cv_rewriter import CVRewriteAgent
 from app.agents.cv_validator import CVValidatorAgent
 from app.agents.job_normalizer import JobNormalizerAgent
 from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
+from app.agents.markdown_rewriter import MarkdownRewriteAgent
+from app.agents.ocr_to_markdown import OCRToMarkdownAgent
 from app.agents.report_generator import ReportGeneratorAgent
 from app.agents.rescorer import RescoreAgent
 from app.agents.score_explainer import ScoreExplainerAgent
@@ -48,6 +50,9 @@ _optimization_service = OptimizationService(
     validator=CVValidatorAgent(),
     rescorer=_rescorer_agent,
     report_generator=ReportGeneratorAgent(llm=_llm_client),
+    # Markdown-safe pipeline agents
+    ocr_to_markdown=OCRToMarkdownAgent(llm=_llm_client),
+    markdown_rewriter=MarkdownRewriteAgent(llm=_llm_client),
 )
 
 
