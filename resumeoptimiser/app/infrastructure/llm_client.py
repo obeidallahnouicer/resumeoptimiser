@@ -138,8 +138,15 @@ def _repair_json(text: str) -> str:
 class LLMClientProtocol(Protocol):
     """Structural protocol for any LLM client."""
 
-    def complete(self, system: str, user: str) -> str:
-        """Return the assistant reply as a plain string."""
+    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+        """Return the assistant reply as a plain string.
+
+        Args:
+            system: System prompt.
+            user: User message.
+            max_tokens: Override the default max_tokens for this call only.
+                        If None, the value from LLMSettings is used.
+        """
         ...
 
 
@@ -163,19 +170,27 @@ class OpenAILLMClient:
             base_url=settings.base_url if settings.base_url else None,
         )
 
-    def complete(self, system: str, user: str) -> str:
-        """Send a chat request and return the clean response text."""
+    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+        """Send a chat request and return the clean response text.
+
+        Args:
+            system: System prompt.
+            user: User message.
+            max_tokens: Per-call override. Falls back to ``LLMSettings.max_tokens``.
+        """
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
+
+        effective_max_tokens = max_tokens if max_tokens is not None else self._settings.max_tokens
 
         try:
             response = self._client.chat.completions.create(
                 model=self._settings.model,
                 temperature=self._settings.temperature,
                 top_p=self._settings.top_p,
-                max_tokens=self._settings.max_tokens,
+                max_tokens=effective_max_tokens,
                 stream=False,
                 messages=messages,
             )
