@@ -17,6 +17,13 @@ import type {
   ComparisonReport,
   ExplanationReport,
   ExtractResponse,
+  MarkdownDiffInput,
+  MarkdownDiffOutput,
+  MarkdownInput,
+  MarkdownOutput,
+  MarkdownRewriteInput,
+  MarkdownRewriteOutput,
+  MarkdownToPdfInput,
   OptimizedCV,
   ScoreExplainerInput,
   SemanticMatcherInput,
@@ -125,4 +132,57 @@ export async function rewriteCV(input: CVRewriteInput): Promise<OptimizedCV> {
 
 export async function compareResults(input: CompareRequest): Promise<ComparisonReport> {
   return post<CompareRequest, ComparisonReport>('/compare', input);
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline – Stage A (preferred): StructuredCV → Markdown (deterministic)
+// ---------------------------------------------------------------------------
+
+export async function structuredToMarkdown(cv: StructuredCV): Promise<MarkdownOutput> {
+  return post<StructuredCV, MarkdownOutput>('/structured-to-markdown', cv);
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline – Stage A (fallback): OCR text → structured Markdown via LLM
+// ---------------------------------------------------------------------------
+
+export async function ocrToMarkdown(rawText: string): Promise<MarkdownOutput> {
+  return post<MarkdownInput, MarkdownOutput>('/to-markdown', { raw_text: rawText });
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline – Stage B: Markdown + job → improved Markdown
+// ---------------------------------------------------------------------------
+
+export async function rewriteMarkdown(input: MarkdownRewriteInput): Promise<MarkdownRewriteOutput> {
+  return post<MarkdownRewriteInput, MarkdownRewriteOutput>('/rewrite-markdown', input);
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline – Stage C: compute line-by-line diff
+// ---------------------------------------------------------------------------
+
+export async function computeMarkdownDiff(input: MarkdownDiffInput): Promise<MarkdownDiffOutput> {
+  return post<MarkdownDiffInput, MarkdownDiffOutput>('/diff', input);
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline – Stage D: render Markdown → PDF
+// ---------------------------------------------------------------------------
+
+/**
+ * Download the improved CV as a PDF rendered from a fixed HTML/CSS template.
+ * Returns a Blob so the caller can trigger a browser download.
+ */
+export async function renderMarkdownPdf(input: MarkdownToPdfInput): Promise<Blob> {
+  const res = await fetch(`${BASE}/render-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ code: 'UNKNOWN', message: res.statusText }));
+    throw new ApiError(res.status, err.code ?? 'UNKNOWN', err.message ?? res.statusText);
+  }
+  return res.blob();
 }
