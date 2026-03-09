@@ -1,8 +1,8 @@
 import { motion } from 'motion/react';
-import { ArrowUpRight, FileEdit, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, FileEdit, Download, Loader2, AlertCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
-import { compareResults, ApiError } from '../../api';
+import { compareResults, renderMarkdownPdf, parseCv, ApiError } from '../../api';
 import { CvMarkdownEditor } from '../ui/CvMarkdownEditor';
 import { cvToMarkdown } from '../../lib/pdf/cv_to_markdown';
 
@@ -11,30 +11,62 @@ interface CompareStageProps { readonly onReset?: () => void; }
 export function CompareStage({ onReset }: CompareStageProps) {
   const {
     structuredCV, structuredJob, similarityScore, explanationReport, optimizedCV,
+    improvedMarkdown,
     comparisonReport, setComparisonReport, setError,
   } = usePipeline();
   const [loading, setLoading] = useState(!comparisonReport);
   const [errorMsg, setErrorMsg] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const calledRef = useRef(false);
 
   useEffect(() => {
     if (comparisonReport) { setLoading(false); return; }
-    if (!structuredCV || !structuredJob || !similarityScore || !explanationReport || !optimizedCV) {
+    // The new Markdown pipeline populates improvedMarkdown instead of optimizedCV.
+    // Accept either path: structured optimizedCV (legacy) or improvedMarkdown (new).
+    if (!structuredCV || !structuredJob || !similarityScore || !explanationReport) {
+      setErrorMsg('Missing pipeline data.'); setLoading(false); return;
+    }
+    if (!optimizedCV && !improvedMarkdown) {
       setErrorMsg('Missing pipeline data.'); setLoading(false); return;
     }
     if (calledRef.current) return;
     calledRef.current = true;
-    const optimizedAsStructured = { ...structuredCV, sections: optimizedCV.sections, contact: optimizedCV.contact };
+
     (async () => {
       try {
+        // If we have improvedMarkdown (new Markdown pipeline), re-parse it to get
+        // a proper StructuredCV for the rescorer — this gives a real score delta.
+        // If optimizedCV exists (legacy structured pipeline), use it directly.
+        let optimizedAsStructured = optimizedCV
+          ? { ...structuredCV, sections: optimizedCV.sections, contact: optimizedCV.contact }
+          : structuredCV;
+
+        if (improvedMarkdown && !optimizedCV) {
+          // Re-parse the improved markdown text so the rescorer scores the actual
+          // improved content, not the original. This is a background LLM call but
+          // it's necessary for a meaningful score delta.
+          try {
+            optimizedAsStructured = await parseCv(improvedMarkdown);
+          } catch {
+            // Non-fatal: fall back to original if parse fails
+            optimizedAsStructured = structuredCV;
+          }
+        }
+
+        const cvSchema = optimizedCV ?? {
+          contact: optimizedAsStructured.contact,
+          sections: optimizedAsStructured.sections,
+          changes_summary: [],
+        };
+
         const report = await compareResults({
           original_cv: structuredCV,
           optimized_cv: optimizedAsStructured,
           job: structuredJob,
           original_score: similarityScore,
           explanation: explanationReport,
-          optimized_cv_schema: optimizedCV,
+          optimized_cv_schema: cvSchema,
         });
         setComparisonReport(report);
       } catch (err) {
@@ -62,7 +94,32 @@ export function CompareStage({ onReset }: CompareStageProps) {
   const after  = comparisonReport?.improved_score.after.overall ?? 0;
   const delta  = comparisonReport?.improved_score.delta ?? 0;
   const changes = comparisonReport?.optimized_cv.changes_summary ?? [];
-  const candidateName = cv?.contact?.name?.trim() || 'Candidate';
+
+  // Prefer the contact name from the structured CV (always reliable).
+  const candidateName = structuredCV?.contact?.name?.trim() || cv?.contact?.name?.trim() || 'Candidate';
+
+  // The PDF and editor always use improvedMarkdown (the faithful Markdown pipeline output).
+  // cvToMarkdown(cv) is only a last-resort fallback when the Markdown pipeline didn't run.
+  const markdownForPdf = improvedMarkdown ?? (cv ? cvToMarkdown(cv) : '');
+
+  async function handleDownloadPdf() {
+    if (!markdownForPdf) return;
+    setPdfDownloading(true);
+    try {
+      const blob = await renderMarkdownPdf({ markdown: markdownForPdf, candidate_name: candidateName });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${candidateName.replace(/\s+/g, '_').toLowerCase()}_cv.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // fallback: open the editor to let the user print manually
+      setEditorOpen(true);
+    } finally {
+      setPdfDownloading(false);
+    }
+  }
 
   const metrics = [
     { label: 'Match Before', value: `${Math.round(before * 100)}%`, diff: null },
@@ -73,9 +130,9 @@ export function CompareStage({ onReset }: CompareStageProps) {
 
   return (
     <>
-      {editorOpen && cv && (
+      {editorOpen && (
         <CvMarkdownEditor
-          initialMarkdown={cvToMarkdown(cv)}
+          initialMarkdown={markdownForPdf}
           candidateName={candidateName}
           onClose={() => setEditorOpen(false)}
         />
@@ -122,10 +179,20 @@ export function CompareStage({ onReset }: CompareStageProps) {
 
         <div className="flex justify-center gap-4">
           <motion.button
-            onClick={() => setEditorOpen(true)}
-            className="flex items-center gap-2 px-8 py-4 bg-accent text-bg-primary font-bold rounded-xl hover:bg-white transition-colors shadow-[0_0_30px_var(--color-accent-dim)]"
+            onClick={handleDownloadPdf}
+            disabled={pdfDownloading}
+            className="flex items-center gap-2 px-8 py-4 bg-accent text-bg-primary font-bold rounded-xl hover:bg-white transition-colors shadow-[0_0_30px_var(--color-accent-dim)] disabled:opacity-50"
             whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-            <FileEdit className="w-5 h-5" />Preview &amp; Edit PDF
+            {pdfDownloading
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : <Download className="w-5 h-5" />}
+            {pdfDownloading ? 'Generating PDF…' : 'Download PDF'}
+          </motion.button>
+          <motion.button
+            onClick={() => setEditorOpen(true)}
+            className="flex items-center gap-2 px-8 py-4 border border-border text-text-secondary hover:text-text-primary transition-colors rounded-xl"
+            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <FileEdit className="w-5 h-5" />Preview &amp; Edit
           </motion.button>
           {onReset && (
             <motion.button
