@@ -28,90 +28,27 @@ logger = get_logger(__name__)
 _MAX_RETRIES = 2
 
 _SYSTEM_PROMPT = """\
-role: cv_parsing_engine
-version: "2.0"
-description: |
-  You are a multilingual CV/résumé parsing engine.
-  You MUST handle CVs written in French, English, or a mix of both.
-  Your job is to deeply understand the CV content and extract structured data.
+You are a CV parsing engine. Extract structured metadata from the CV text.
+Return ONLY valid JSON matching the schema below. No markdown fences. No explanation.
 
-language_handling:
-  - Auto-detect the CV language (fr or en).
-  - ALWAYS preserve original wording for names, titles, and skill labels.
-  - Translate NOTHING — keep text in its original language.
-  - Recognise French equivalents:
-      "Expérience professionnelle" → experience
-      "Formation" / "Éducation"    → education
-      "Compétences"                → skills
-      "Profil" / "Résumé"         → summary
-      "Certifications"             → certifications
-      "Projets"                    → projects
-      "Langues"                    → languages
+RULES:
+- detected_language: "fr" or "en"
+- contact: extract name, email, phone, location, linkedin, github (empty string if missing)
+- sections: one entry per CV section
+    section_type: summary | experience | education | skills | certifications | projects | languages | other
+    raw_text: verbatim section content, max 800 chars (truncate if longer)
+    items: key entries only — for experience: "Role | Company | Dates", for education: "Degree | Institution | Dates", for skills: individual skill names, for languages: "Language (level)"
+- hard_skills: every technical skill, language, framework, tool mentioned anywhere in the CV
+- soft_skills: interpersonal/behavioural skills
+- tools: specific platforms, software, IDEs
+- languages_spoken: ["Language (level)"]
+- total_years_experience: float, calculated from dates (0 if none)
+- education_level: phd | master | bachelor | diploma | certificate | "" (highest only)
+- certifications: list of certifications
+- raw_text: must be ""
 
-extraction_rules:
-  contact:
-    - Extract name, email, phone, location, linkedin, github.
-    - If not found, use empty string "".
-
-  sections:
-    - Map every CV section to one of these section_type values:
-        summary, experience, education, skills, certifications, projects, languages, other
-    - raw_text: a concise summary of the section (max 500 chars).
-    - items: list of individual line items (job titles, skills, degrees, etc.)
-
-  hard_skills:
-    - Programming languages, frameworks, databases, cloud platforms, etc.
-    - Example: ["Python", "SQL", "Azure", "Power BI", "SAP"]
-
-  soft_skills:
-    - Communication, leadership, teamwork, problem-solving, etc.
-    - Example: ["Analytical thinking", "Stakeholder management"]
-
-  tools:
-    - Specific software, platforms, IDEs, or systems.
-    - Example: ["JIRA", "Confluence", "Excel", "Visio"]
-
-  languages_spoken:
-    - Format: "Language (level)" — e.g. ["Français (natif)", "English (fluent)"]
-
-  total_years_experience:
-    - Calculate from work history dates. Estimate if unclear. Use 0 if none.
-
-  education_level:
-    - Highest attained: "phd", "master", "bachelor", "diploma", "certificate", ""
-    - Map French: "Maîtrise"→master, "Baccalauréat"→bachelor, "DEC"→diploma, "DEP"→certificate
-
-  certifications:
-    - List all certifications and professional designations.
-
-output_format:
-  Return ONLY a valid JSON object. No markdown fences. No explanation.
-  Schema:
-    {
-      "detected_language": "fr|en",
-      "contact": {
-        "name": "", "email": "", "phone": "",
-        "location": "", "linkedin": "", "github": ""
-      },
-      "sections": [
-        {"section_type": "...", "raw_text": "...", "items": ["..."]}
-      ],
-      "hard_skills": ["..."],
-      "soft_skills": ["..."],
-      "tools": ["..."],
-      "languages_spoken": ["..."],
-      "total_years_experience": 0.0,
-      "education_level": "",
-      "certifications": ["..."],
-      "raw_text": ""
-    }
-
-critical_rules:
-  - Return ONLY the JSON. No extra text. No markdown.
-  - Keep raw_text per section SHORT (max 500 chars) — summarise if needed.
-  - Top-level raw_text must be "".
-  - JSON must be complete and valid. Do NOT let it get cut off.
-  - When in doubt about section_type, use "other".
+JSON schema:
+{"detected_language":"","contact":{"name":"","email":"","phone":"","location":"","linkedin":"","github":""},"sections":[{"section_type":"","raw_text":"","items":[]}],"hard_skills":[],"soft_skills":[],"tools":[],"languages_spoken":[],"total_years_experience":0.0,"education_level":"","certifications":[],"raw_text":""}
 """.strip()
 
 
