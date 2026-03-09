@@ -14,6 +14,12 @@ Pipeline:
   7. CVValidatorAgent          → CVValidatorOutput       (rules only)
   8. RescoreAgent              → ImprovedScoreSchema     (embeddings only)
   9. ReportGeneratorAgent      → ComparisonReportSchema  (LLM)
+
+Markdown-safe pipeline (parallel, independently callable):
+  A. OCRToMarkdownAgent        → MarkdownOutput  (original_cv.md)
+  B. MarkdownRewriteAgent      → MarkdownRewriteOutput  (improved_cv.md)
+  C. MarkdownDiffService       → MarkdownDiffOutput  (diff)
+  D. MarkdownPDFRenderer       → PDF bytes
 """
 
 from __future__ import annotations
@@ -23,6 +29,8 @@ from app.agents.cv_rewriter import CVRewriteAgent
 from app.agents.cv_validator import CVValidatorAgent, CVValidatorInput
 from app.agents.job_normalizer import JobNormalizerAgent
 from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
+from app.agents.markdown_rewriter import MarkdownRewriteAgent
+from app.agents.ocr_to_markdown import OCRToMarkdownAgent
 from app.agents.report_generator import ReportGeneratorAgent, ReportGeneratorInput
 from app.agents.rescorer import RescoreAgent, RescoreInput
 from app.agents.score_explainer import ScoreExplainerAgent
@@ -31,9 +39,16 @@ from app.core.exceptions import AgentExecutionError, ValidationError
 from app.core.logging import get_logger
 from app.schemas.cv import CVParserInput, StructuredCVSchema
 from app.schemas.job import JobNormalizerInput
+from app.schemas.markdown import (
+    MarkdownInput,
+    MarkdownOutput,
+    MarkdownRewriteInput,
+    MarkdownRewriteOutput,
+)
 from app.schemas.pipeline import ComparisonReportSchema
 from app.schemas.report import CVRewriteInput, ScoreExplainerInput
 from app.schemas.scoring import SemanticMatcherInput, SimilarityScoreSchema
+from app.services.cv_to_markdown import structured_cv_to_markdown
 
 logger = get_logger(__name__)
 
@@ -56,6 +71,8 @@ class OptimizationService:
         validator: CVValidatorAgent,
         rescorer: RescoreAgent,
         report_generator: ReportGeneratorAgent,
+        ocr_to_markdown: OCRToMarkdownAgent,
+        markdown_rewriter: MarkdownRewriteAgent,
     ) -> None:
         self._cv_parser = cv_parser
         self._job_normalizer = job_normalizer
@@ -66,6 +83,8 @@ class OptimizationService:
         self._validator = validator
         self._rescorer = rescorer
         self._report_generator = report_generator
+        self._ocr_to_markdown_agent = ocr_to_markdown
+        self._markdown_rewriter = markdown_rewriter
 
     def run(self, cv_text: str, job_text: str) -> ComparisonReportSchema:
         """Execute the full pipeline end-to-end."""
@@ -161,3 +180,33 @@ class OptimizationService:
                 optimized_cv=optimized_cv,
             )
         )
+
+    # ------------------------------------------------------------------
+    # Markdown-safe pipeline steps (independently callable)
+    # ------------------------------------------------------------------
+
+    def structured_cv_to_markdown(self, cv: StructuredCVSchema) -> MarkdownOutput:
+        """Deterministic: convert an already-parsed StructuredCVSchema → Markdown.
+
+        This is the CORRECT way to produce original_cv.md.
+        No LLM, no OCR — pure structural rendering. Preserves all content exactly.
+        """
+        markdown = structured_cv_to_markdown(cv)
+        return MarkdownOutput(markdown=markdown)
+
+    def ocr_to_markdown(self, input: MarkdownInput) -> MarkdownOutput:  # noqa: A002
+        """Step A – Convert raw OCR/PDF text to clean structured Markdown via LLM.
+
+        Prefer calling structured_cv_to_markdown() when a StructuredCVSchema is
+        available (after the parse stage) — it is deterministic and more reliable.
+        This LLM path is a fallback for raw text without prior parsing.
+        """
+        return self._ocr_to_markdown_agent.execute(input)
+
+    def rewrite_markdown(self, input: MarkdownRewriteInput) -> MarkdownRewriteOutput:  # noqa: A002
+        """Step B – Improve CV wording while preserving Markdown structure.
+
+        Input:  original_cv.md + job context + optional gap analysis.
+        Output: improved_cv.md (same structure, better wording) + changes_summary.
+        """
+        return self._markdown_rewriter.execute(input)
