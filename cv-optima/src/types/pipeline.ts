@@ -4,7 +4,7 @@
  * These types are the single source of truth for what the frontend
  * sends to and receives from the FastAPI backend.
  *
- * Keep in sync with: app/schemas/*.py
+ * Keep in sync with: app/schemas/*.py and app/schemas/markdown.py
  */
 
 // ---------------------------------------------------------------------------
@@ -200,4 +200,50 @@ export interface CompareRequest {
   original_score: SimilarityScore;
   explanation: ExplanationReport;
   optimized_cv_schema: OptimizedCV;
+}
+
+// ---------------------------------------------------------------------------
+// Markdown pipeline types (mirrors app/schemas/markdown.py)
+// ---------------------------------------------------------------------------
+
+/** Input for OCRToMarkdownAgent (POST /to-markdown) */
+export interface MarkdownInput {
+  raw_text: string;
+}
+
+/** Output of OCRToMarkdownAgent – the immutable original_cv.md */
+export interface MarkdownOutput {
+  markdown: string;
+}
+
+/** Input for MarkdownRewriteAgent (POST /rewrite-markdown) */
+export interface MarkdownRewriteInput {
+  original_markdown: string;
+  job_title: string;
+  job_description: string;
+  gap_analysis: string;
+}
+
+/** Output of MarkdownRewriteAgent – improved_cv.md */
+export interface MarkdownRewriteOutput {
+  improved_markdown: string;
+  changes_summary: string[];
+}
+
+/** Input for the diff endpoint (POST /diff) */
+export interface MarkdownDiffInput {
+  original_markdown: string;
+  improved_markdown: string;
+}
+
+/** Output of the diff endpoint */
+export interface MarkdownDiffOutput {
+  diff_lines: string[];
+  change_count: number;
+}
+
+/** Input for the render-pdf endpoint (POST /render-pdf) */
+export interface MarkdownToPdfInput {
+  markdown: string;
+  candidate_name: string;
 }
