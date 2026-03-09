@@ -1,7 +1,7 @@
 /**
  * PipelineContext – shared state for the entire CV optimisation pipeline.
  *
- * Holds every piece of data produced by the backend across the 6 UI stages.
+ * Holds every piece of data produced by the backend across all UI stages.
  * Exposed via usePipeline() hook. No API calls happen here – stages call
  * api.ts and store results via the setters provided by this context.
  */
@@ -14,6 +14,7 @@ import type {
   ExplanationReport,
   OptimizedCV,
   ComparisonReport,
+  MarkdownDiffOutput,
 } from '../types/pipeline';
 
 interface PipelineState {
@@ -22,13 +23,18 @@ interface PipelineState {
   jobText: string;
   cvFilename: string;
 
-  // Stage outputs
+  // Stage outputs – structured pipeline
   structuredCV: StructuredCV | null;
   structuredJob: StructuredJob | null;
   similarityScore: SimilarityScore | null;
   explanationReport: ExplanationReport | null;
   optimizedCV: OptimizedCV | null;
   comparisonReport: ComparisonReport | null;
+
+  // Markdown pipeline (layout-safe)
+  originalMarkdown: string | null;   // original_cv.md – immutable
+  improvedMarkdown: string | null;   // improved_cv.md – wording only
+  markdownDiff: MarkdownDiffOutput | null;
 
   // Error tracking
   error: string | null;
@@ -42,6 +48,9 @@ interface PipelineActions {
   setExplanationReport: (report: ExplanationReport) => void;
   setOptimizedCV: (cv: OptimizedCV) => void;
   setComparisonReport: (report: ComparisonReport) => void;
+  setOriginalMarkdown: (md: string) => void;
+  setImprovedMarkdown: (md: string) => void;
+  setMarkdownDiff: (diff: MarkdownDiffOutput) => void;
   setError: (message: string | null) => void;
   reset: () => void;
 }
@@ -56,6 +65,9 @@ const initialState: PipelineState = {
   explanationReport: null,
   optimizedCV: null,
   comparisonReport: null,
+  originalMarkdown: null,
+  improvedMarkdown: null,
+  markdownDiff: null,
   error: null,
 };
 
@@ -85,6 +97,15 @@ export function PipelineProvider({ children }: { children: ReactNode }) {
 
     setComparisonReport: (report) =>
       setState((s) => ({ ...s, comparisonReport: report })),
+
+    setOriginalMarkdown: (md) =>
+      setState((s) => ({ ...s, originalMarkdown: md })),
+
+    setImprovedMarkdown: (md) =>
+      setState((s) => ({ ...s, improvedMarkdown: md })),
+
+    setMarkdownDiff: (diff) =>
+      setState((s) => ({ ...s, markdownDiff: diff })),
 
     setError: (message) =>
       setState((s) => ({ ...s, error: message })),
