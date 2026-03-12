@@ -38,8 +38,7 @@ logger = get_logger(__name__)
 # ── Markdown structure regexes ────────────────────────────────────────────────
 _H1_RE = re.compile(r"^#\s+(.+)$")       # # Name
 _H2_RE = re.compile(r"^##\s+(.+)$")       # ## SECTION
-_H3_RE = re.compile(r"^###\s+(.+)$")      # ### Role | Company
-_BOLD_RE = re.compile(r"^\*\*(.+)\*\*$")  # **Sub-heading**
+_ENTRY_HEADING_RE = re.compile(r"^\*\*(.+)\*\*$")  # **Role | Company**
 _BULLET_RE = re.compile(r"^-\s+(.+)$")    # - item
 
 # Section heading → SectionType
@@ -242,16 +241,12 @@ def _parse_markdown(markdown: str) -> StructuredCVSchema:
         if raw:
             current_raw.append(raw)
 
-        # H3 → entry header "Role | Company" or "Degree | Institution"
-        if m := _H3_RE.match(line):
+        # Entry header "Role | Company" or "Degree | Institution" previously H3
+        if m := _ENTRY_HEADING_RE.match(line):
             entry = m.group(1).strip()
             current_items.append(entry)
             if current_section == SectionType.EDUCATION:
                 edu_items.append(entry)
-            continue
-
-        # Bold sub-heading (skill categories) — structural, skip
-        if _BOLD_RE.match(line):
             continue
 
         # Bullet → item
@@ -280,7 +275,7 @@ def _parse_markdown(markdown: str) -> StructuredCVSchema:
             # experience/projects/summary bullets → raw_text only, not items
             continue
 
-        # Plain text — date lines under ### entries contribute to years
+        # Plain text — date lines under entry headings contribute to years
         if raw and current_section == SectionType.EXPERIENCE:
             yrs = _years_from_date_line(raw)
             if yrs > 0:
