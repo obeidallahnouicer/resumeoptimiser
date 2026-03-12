@@ -34,6 +34,9 @@ class LLMSettings(BaseSettings):
     temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_tokens: int = Field(default=4096, gt=0)
+    # Total wall-clock timeout (seconds) for a single LLM API call.
+    # Covers connect + read. 0 = no timeout (not recommended).
+    timeout: float = Field(default=120.0, ge=0.0)
 
 
 class EmbeddingSettings(BaseSettings):
