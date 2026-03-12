@@ -13,7 +13,7 @@ Format contract:
 
   ## SECTION HEADING
 
-  ### Job Title | Company | Dates | Location
+  **Job Title | Company | Dates | Location**
   - Achievement bullet one
   - Achievement bullet two
 
@@ -103,7 +103,7 @@ def _render_section(section: CVSectionSchema) -> list[str]:
                     # Only add blank line if previous line was a bullet (not already blank)
                     if lines[-1] != "":
                         lines.append("")
-                lines.append(f"### {item}")
+                lines.append(f"**{item}**")
                 last_was_header = True
             else:
                 # Content bullet — strip any leading dash/bullet the parser may have added
