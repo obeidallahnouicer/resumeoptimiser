@@ -59,6 +59,16 @@ _URL_RE = re.compile(r"(https?://|www\.|linkedin\.com|github\.com)", re.IGNORECA
 # Entry header pattern: "Something | Something | Something" or "Something – Something"
 _ENTRY_HEADER_RE = re.compile(r".{3,}\s*[|–—]\s*.{2,}")
 
+# Date/location lines that look like entry headers but aren't (start with month or year)
+_DATE_START_RE = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|"
+    r"October|November|December|\d{4})\b",
+    re.IGNORECASE,
+)
+
+# Inline bullet separator: "A  •  B  •  C" (bullet used as separator, not list marker)
+_INLINE_BULLET_RE = re.compile(r"\s*•\s*")
+
 # Bullet markers that should become "- " bullets
 _BULLET_RE = re.compile(r"^\s*[•●▪▸◦‣*\-–]\s+")
 
@@ -79,13 +89,47 @@ def _is_contact_line(line: str) -> bool:
 
 
 def _is_entry_header(line: str) -> bool:
-    """True if line looks like a role/education header (contains | or –)."""
+    """True if line looks like a role/education header (contains | or –).
+
+    Explicitly rejects date/location lines like
+    "January 2026 - Present  |  Tunis, Tunisia" — those start with a month
+    name or a four-digit year and are metadata, not entry headers.
+    """
     s = line.strip()
     if len(s) > 160 or not s:
         return False
     if s[0].islower():
         return False
+    # Date lines start with a month name or year — they are *not* entry headers
+    if _DATE_START_RE.match(s):
+        return False
     return bool(_ENTRY_HEADER_RE.match(s))
+
+
+def _is_inline_bullet_list(stripped: str, line: str) -> bool:
+    """True when • is used as an inline separator (not a leading bullet marker)."""
+    return "•" in stripped and not _has_bullet_marker(line)
+
+
+def _looks_like_sub_heading(stripped: str) -> bool:
+    """True for short skill sub-category lines like 'AI & Machine Learning'.
+
+    Criteria: 2–6 words, title-case or all-caps, no punctuation at end,
+    no bullet chars, no pipe/dash separators, no digits.
+    """
+    if not stripped or len(stripped) > 60:
+        return False
+    words = stripped.split()
+    if not (2 <= len(words) <= 6):
+        return False
+    # Must not contain digits (dates, percentages, etc.)
+    if re.search(r"\d", stripped):
+        return False
+    # Must not contain separator chars that would make it an entry header
+    if re.search(r"[|–—:]", stripped):
+        return False
+    # Must be title-cased or all-caps
+    return stripped.istitle() or stripped.isupper() or stripped[0].isupper()
 
 
 def _strip_bullet_marker(line: str) -> str:
@@ -173,9 +217,28 @@ def _raw_to_markdown(raw_text: str) -> str:
             out.append(f"### {stripped}")
             continue
 
+        # ── Inline bullet-separated list  "A  •  B  •  C" ───────────────────
+        # When • appears as an inline separator (not a leading marker), split
+        # each item into its own "- item" bullet.
+        if "•" in stripped and not _has_bullet_marker(line):
+            parts = [p.strip() for p in _INLINE_BULLET_RE.split(stripped) if p.strip()]
+            if len(parts) > 1:
+                for part in parts:
+                    out.append(f"- {part}")
+                continue
+
         # ── Bullet items ──────────────────────────────────────────────────────
         if _has_bullet_marker(line):
             out.append(f"- {_strip_bullet_marker(line)}")
+            continue
+
+        # ── Skills / category sub-heading  "AI & Machine Learning" ───────────
+        # Short title-cased label after a section heading, no separators, no digits.
+        if found_first_section and _looks_like_sub_heading(stripped):
+            if out and out[-1] != "":
+                out.append("")
+            out.append(f"**{stripped}**")
+            out.append("")
             continue
 
         # ── Plain content line ────────────────────────────────────────────────
