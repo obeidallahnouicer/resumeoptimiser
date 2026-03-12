@@ -144,7 +144,14 @@ def _years_from_date_line(text: str) -> float:
     """Extract years of experience from a date-range string."""
     years = re.findall(r"\b(20\d{2}|19\d{2})\b", text)
     if len(years) >= 2:
-        return float(int(years[-1]) - int(years[0]))
+        start_year = int(years[0])
+        end_year = int(years[-1])
+        duration = float(end_year - start_year)
+        # Add months if present in the text
+        months = re.findall(r"\b(\d{1,2})\s*(?:months?|m)\b", text, re.IGNORECASE)
+        if months:
+            duration += int(months[0]) / 12.0
+        return round(duration, 1)
     if "present" in text.lower() and len(years) == 1:
         today = date.today()
         return round((today.year - int(years[0])) + today.month / 12, 1)
