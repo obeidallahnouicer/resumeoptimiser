@@ -23,10 +23,10 @@ import json
 import re
 from typing import Protocol, runtime_checkable
 
-from openai import OpenAI, APIError
+from openai import OpenAI, APIError, APITimeoutError
 
 from app.core.config import LLMSettings
-from app.core.exceptions import LLMError
+from app.core.exceptions import LLMError, LLMTimeoutError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -168,6 +168,12 @@ class OpenAILLMClient:
         self._client = OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url if settings.base_url else None,
+            # Apply a wall-clock timeout so LLM calls never hang indefinitely.
+            # timeout=0 means no limit (useful for local models without rate limits).
+            timeout=settings.timeout if settings.timeout > 0 else None,
+            # Disable built-in SDK retries — we handle retries ourselves per-agent,
+            # and silent SDK retries cause multi-minute hangs on 5xx responses.
+            max_retries=0,
         )
 
     def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
@@ -194,6 +200,9 @@ class OpenAILLMClient:
                 stream=False,
                 messages=messages,
             )
+        except APITimeoutError as exc:
+            logger.error("llm_timeout", timeout=self._settings.timeout)
+            raise LLMTimeoutError(f"LLM request timed out after {self._settings.timeout}s") from exc
         except APIError as exc:
             logger.error("llm_api_error", error=str(exc))
             raise LLMError(str(exc)) from exc
