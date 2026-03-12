@@ -13,6 +13,7 @@ Design:
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 
@@ -23,6 +24,7 @@ from app.agents.ocr_to_markdown import (
     _URL_RE,
     _raw_to_markdown,
 )
+from app.core.exceptions import AgentExecutionError, CVParsingError
 from app.core.logging import get_logger
 from app.domain.models import SectionType
 from app.infrastructure.llm_client import LLMClientProtocol
@@ -315,16 +317,35 @@ class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
     meta = AgentMeta(name="CVParserAgent", version="4.0.0")
 
     def __init__(self, llm: LLMClientProtocol) -> None:
-        _ = llm  # accepted for DI compatibility, never used
+        self._llm = llm
 
     def execute(self, input: CVParserInput) -> StructuredCVSchema:  # noqa: A002
         logger.info("cv_parser.start", text_length=len(input.raw_text))
 
-        markdown = _raw_to_markdown(input.raw_text)
-        logger.info("cv_parser.markdown_ready", chars=len(markdown))
+        try:
+            llm_response = self._llm.complete(user=input.raw_text)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 
-        schema = _parse_markdown(markdown)
-        schema.markdown = markdown
+        if not llm_response:
+            raise CVParsingError("Empty response from LLM")
+
+        try:
+            data = json.loads(llm_response)
+        except Exception as exc:
+            raise CVParsingError("LLM did not return valid JSON") from exc
+
+        required_keys = {"contact", "sections", "raw_text"}
+        if not required_keys.issubset(set(data.keys())):
+            raise CVParsingError("LLM JSON missing required top-level keys")
+
+        try:
+            schema = StructuredCVSchema.model_validate(data)
+        except Exception as exc:
+            raise CVParsingError("LLM JSON does not match StructuredCVSchema") from exc
+
+        schema.raw_text = input.raw_text
+        schema.markdown = _raw_to_markdown(input.raw_text)
 
         logger.info(
             "cv_parser.done",
