@@ -42,7 +42,7 @@ _THINK_TAIL_RE = re.compile(r"^.*?</think>", re.DOTALL)
 
 # The model often wraps JSON in markdown fences (```json … ```) despite
 # being told not to.  Strip them so agents can call json.loads() directly.
-_MD_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?(.*?)\n?```$", re.DOTALL)
+_MD_FENCE_RE = re.compile(r"```[a-zA-Z]*\n?(.*?)\n?```", re.DOTALL)
 
 
 def _strip_think(text: str) -> str:
@@ -57,8 +57,27 @@ def _strip_think(text: str) -> str:
 
 def _strip_markdown_fence(text: str) -> str:
     """Unwrap ```json … ``` or ``` … ``` fences if present."""
-    m = _MD_FENCE_RE.match(text.strip())
+    m = _MD_FENCE_RE.search(text.strip())
     return m.group(1).strip() if m else text
+
+
+def _strip_chat_artifacts(text: str) -> str:
+    """Strip '### Response:' and other conversational filler from the LLM."""
+    # 1. strip template headers (e.g., DeepSeek / Llama)
+    text = re.sub(
+        r"^\s*(?:###?\s*)?(?:Assistant|Response|Output|Result|Thought|Answer|JSON|Markdown)s*\s*:?[ \t]*\n*", 
+        "", 
+        text, 
+        flags=re.IGNORECASE
+    )
+    # 2. strip conversational preamble
+    text = re.sub(
+        r"^\s*(?:Here is|Here's|Sure,|Okay,|Certainly,|I have|Below is|The following is|Here are).*?:\s*\n*",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+    return text.strip()
 
 
 def _repair_json(text: str) -> str:
@@ -221,6 +240,8 @@ class OpenAILLMClient:
 
         # Strip <think>…</think> reasoning blocks (safety net)
         text = _strip_think(text)
+        # Strip common conversational artifacts like '### Response:'
+        text = _strip_chat_artifacts(text)
         # Unwrap ```json … ``` markdown fences the model adds despite instructions
         text = _strip_markdown_fence(text)
         # Attempt to repair truncated JSON (e.g. when max_tokens is hit)
