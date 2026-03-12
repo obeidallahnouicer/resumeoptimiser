@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from pydantic import BaseModel
 
 from app.api.deps import get_optimization_service
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, LLMTimeoutError
 from app.core.logging import get_logger
 from app.schemas.cv import CVParserInput, StructuredCVSchema
 from app.schemas.job import JobNormalizerInput, StructuredJobSchema
@@ -57,6 +57,11 @@ logger = get_logger(__name__)
 
 
 def _handle_app_error(exc: AppError) -> None:
+    if isinstance(exc, LLMTimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={"code": exc.code, "message": exc.message},
+        )
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail={"code": exc.code, "message": exc.message},
