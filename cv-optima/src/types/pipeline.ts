@@ -52,6 +52,8 @@ export interface StructuredCV {
   contact: ContactInfo;
   sections: CVSection[];
   raw_text: string;
+  /** Deterministic OCR→Markdown generated during parsing. Use as original_cv.md. */
+  markdown?: string;
   // enriched fields
   detected_language?: string;
   hard_skills?: string[];
