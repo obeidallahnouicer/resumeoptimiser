@@ -15,7 +15,7 @@ Output format contract:
   email  |  phone  |  location
 
   ## SECTION HEADING
-  ### Role | Company | Dates
+  **Role | Company | Dates**
   - Bullet item
 
   ## NEXT SECTION
@@ -214,7 +214,7 @@ def _raw_to_markdown(raw_text: str) -> str:
         if _is_entry_header(stripped):
             if out and out[-1] != "":
                 out.append("")
-            out.append(f"### {stripped}")
+            out.append(f"**{stripped}**")
             continue
 
         # ── Inline bullet-separated list  "A  •  B  •  C" ───────────────────
