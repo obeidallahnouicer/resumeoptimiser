@@ -108,16 +108,18 @@ CONTENT IMPROVEMENT RULES — APPLY AGGRESSIVELY
 ════════════════════════════════════════════════════
 
   a. Replace weak/passive verbs with strong action verbs:
-       "was responsible for" → "owned" / "led" / "drove"
-       "helped with" → "contributed to" / "collaborated on"
-       "worked on" → "engineered" / "built" / "delivered"
-       "managed" → "directed" / "spearheaded" / "oversaw"
+      "was responsible for" → "owned" / "led" / "drove"
+      "helped with" → "contributed to" / "collaborated on"
+      "worked on" → "engineered" / "built" / "delivered"
+      "managed" → "directed" / "spearheaded" / "oversaw"
   b. Weave in job description keywords naturally into existing bullets.
   c. Make bullets punchier: remove filler, cut passive voice, compress fluff.
   d. Fix grammar errors.
   e. Do NOT add new bullet points, new sections, or invent facts/metrics.
   f. Do NOT delete any existing bullet point or section.
   g. Do NOT change job titles, company names, dates, or degrees.
+  h. Do NOT introduce new skills/tools/technologies/languages/education items that were not present in the input section. Rephrase only.
+  i. Do NOT add placeholder headers or contact blocks. Never add new sections or headings.
 
 ════════════════════════════════════════════════════
 OUTPUT FORMAT
@@ -334,15 +336,17 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
 
         Fixes applied (in order):
           1. Restore ## level for section headings the LLM promoted to #.
-          2. Force entry heading lines to be bold (i.e. **Role | Company**) if the LLM promoted them to ## or #.
-          3. Strip floating bold degree lines (e.g. **Bachelor's Degree in Finance**)
-             that should be part of the following entry heading — merge them.
-          4. Remove duplicate date lines that appear directly after an entry heading.
-          5. Collapse 3+ consecutive blank lines down to a single blank line.
-          6. Strip trailing whitespace from every line.
+             2. Force entry heading lines to be bold (i.e. **Role | Company**) if the LLM promoted them to ## or #.
+             3. Drop any extra H1 heading or ## section that was not present in the original document.
+             4. Strip floating bold degree lines (e.g. **Bachelor's Degree in Finance**)
+                 that should be part of the following entry heading — merge them.
+             5. Remove duplicate date lines that appear directly after an entry heading.
+             6. Collapse 3+ consecutive blank lines down to a single blank line.
+             7. Strip trailing whitespace from every line.
         """
         lines = markdown.splitlines()
         lines = cls._fix_heading_levels(lines, original_section_headings)
+        lines = cls._drop_unrecognized_sections(lines, original_section_headings)
         lines = cls._merge_floating_degree_lines(lines)
         lines = cls._remove_duplicate_date_lines(lines)
         lines = cls._collapse_blank_lines(lines)
@@ -397,6 +401,52 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
                 result.append(line)
 
         return result
+
+    # -- 3: drop hallucinated sections/headings ------------------------------
+
+    @classmethod
+    def _drop_unrecognized_sections(
+        cls, lines: list[str], original_section_headings: set[str]
+    ) -> list[str]:
+        """Remove any extra H1/## sections that were not in the original document.
+
+        - Keep only the first H1; drop any additional H1 headings and their blocks.
+        - Keep only ## headings whose text matches original_section_headings (case-insensitive).
+        - Preserve all non-heading content under kept sections.
+        """
+        keep: list[str] = []
+        seen_h1 = False
+        allowed_h2 = {h.upper() for h in original_section_headings}
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+
+            if line.startswith("# "):
+                if seen_h1:
+                    # Skip duplicate H1 block until next heading
+                    i += 1
+                    while i < len(lines) and not lines[i].startswith("#"):
+                        i += 1
+                    continue
+                seen_h1 = True
+                keep.append(line)
+                i += 1
+                continue
+
+            if line.startswith("## "):
+                heading = line[3:].strip()
+                if heading.upper() not in allowed_h2:
+                    # Skip unknown section block until next heading
+                    i += 1
+                    while i < len(lines) and not lines[i].startswith("## ") and not lines[i].startswith("# "):
+                        i += 1
+                    continue
+
+            keep.append(line)
+            i += 1
+
+        return keep
 
     # -- 3: floating bold degree lines ---------------------------------------
 
