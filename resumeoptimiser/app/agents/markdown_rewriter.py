@@ -10,7 +10,7 @@ Sections are reassembled in original order.
 v3 goals (ATS-first):
   1. Enforce ATS-safe Markdown formatting:
        - Contact block: pipe-separated inline, no sub-bullets
-       - Experience entries: ### Role | Company  +  date line  +  bullets
+       - Experience entries: **Role | Company**  +  date line  +  bullets
        - Skills: bold category labels + inline comma-separated values (NOT one-per-bullet)
        - Strict ASCII-only hyphens, no nested lists, no HTML
   2. Improve content quality:
@@ -53,7 +53,7 @@ ATS FORMATTING RULES — MANDATORY, NEVER VIOLATE
 ════════════════════════════════════════════════════
 
 HEADINGS:
-  - Keep ALL headings (# ## ###) exactly as they are. Do not rename or reorder.
+  - Keep ALL section headings (# ##) exactly as they are. Do not rename or reorder.
   - Section headings must be on their own line with NO trailing punctuation.
   - Use exactly ONE blank line before and after every heading.
 
@@ -64,8 +64,8 @@ CONTACT / HEADER BLOCK (the # name section):
   - If LinkedIn or GitHub exist, append them with  |  separators on the same line.
   - Do NOT use sub-bullets or extra lines for contact info.
 
-EXPERIENCE / EDUCATION ENTRIES (### sub-sections):
-  - Format MUST be:  ### Role Title | Company Name
+EXPERIENCE / EDUCATION ENTRIES (** sub-sections):
+  - Format MUST be:  **Role Title | Company Name**
   - Immediately below (no blank line): date range and location as plain text:
       Month YYYY - Month YYYY  |  City, Country
   - Then ONE blank line, then bullet points.
@@ -100,7 +100,7 @@ GENERAL FORMATTING:
   - No italic text.
   - No HTML tags.
   - No horizontal rules (---).
-  - Exactly one blank line between section entries (### blocks).
+  - Exactly one blank line between section entries (** blocks).
   - No trailing spaces on any line.
 
 ════════════════════════════════════════════════════
@@ -334,10 +334,10 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
 
         Fixes applied (in order):
           1. Restore ## level for section headings the LLM promoted to #.
-          2. Restore ### level for entry headings the LLM promoted to ## or #.
+          2. Force entry heading lines to be bold (i.e. **Role | Company**) if the LLM promoted them to ## or #.
           3. Strip floating bold degree lines (e.g. **Bachelor's Degree in Finance**)
-             that should be part of the following ### heading — merge them.
-          4. Remove duplicate date lines that appear directly after a ### heading.
+             that should be part of the following entry heading — merge them.
+          4. Remove duplicate date lines that appear directly after an entry heading.
           5. Collapse 3+ consecutive blank lines down to a single blank line.
           6. Strip trailing whitespace from every line.
         """
@@ -357,13 +357,13 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
         lines: list[str],
         original_section_headings: set[str],
     ) -> list[str]:
-        """Restore ## and ### heading levels that the LLM incorrectly promoted.
+        """Restore ## heading levels that the LLM incorrectly promoted.
 
         Rules:
           - Any heading whose text matches a known ## section (PROFESSIONAL
             EXPERIENCE, EDUCATION, TECHNICAL SKILLS, LANGUAGES, etc.) must be ##.
           - Any heading that contains " | " and is NOT a known ## section is an
-            entry sub-heading (Role | Company) and must be ###.
+            entry sub-heading (Role | Company) and must be bolded (e.g., **Role | Company**).
           - The very first # heading (candidate name) is left as-is.
         """
         result: list[str] = []
@@ -386,9 +386,9 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
                     result.append(f"## {stripped}")
                     continue
 
-                # Entry heading (contains " | ") — force to ###
+                # Entry heading (contains " | ") — force to **...**
                 if "|" in stripped:
-                    result.append(f"### {stripped}")
+                    result.append(f"**{stripped}**")
                     continue
 
                 # Anything else that was ## stays ##; anything deeper stays as-is
@@ -402,15 +402,15 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
 
     @classmethod
     def _merge_floating_degree_lines(cls, lines: list[str]) -> list[str]:
-        """Remove standalone **Degree Name** lines that float before a ### heading.
+        """Remove standalone **Degree Name** lines that float before an entry heading.
 
         The LLM sometimes emits:
             **Bachelor's Degree in Finance**
             (blank line)
-            ### IHEC Carthage  |  ...
+            **IHEC Carthage  |  ...**
 
         We drop the bold line because the degree title already lives inside the
-        ### heading or is redundant — it confuses ATS parsers.
+        entry heading or is redundant — it confuses ATS parsers.
         """
         result: list[str] = []
         i = 0
@@ -420,12 +420,12 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
         while i < len(lines):
             line = lines[i]
             if bold_only.match(line):
-                # Look ahead (skip blanks) to see if next real line is a ###
+                # Look ahead (skip blanks) to see if next real line is an entry heading
                 j = i + 1
                 while j < len(lines) and lines[j].strip() == "":
                     j += 1
-                if j < len(lines) and lines[j].startswith("###"):
-                    # Drop the bold line (and any blank lines between it and ###)
+                if j < len(lines) and " | " in lines[j] and bold_only.match(lines[j]):
+                    # Drop the bold line (and any blank lines between it and entry heading)
                     i = j
                     continue
             result.append(line)
@@ -437,32 +437,34 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
 
     @classmethod
     def _remove_duplicate_date_lines(cls, lines: list[str]) -> list[str]:
-        """Remove a duplicate date/location line that appears right after a ### heading.
+        """Remove a duplicate date/location line that appears right after an entry heading.
 
         The LLM sometimes outputs:
-            ### ESPRIT School of Business  |  September 2024 - Present  |  Tunis, Tunisia
+            **ESPRIT School of Business  |  September 2024 - Present  |  Tunis, Tunisia**
             September 2024 - Present  |  Tunis, Tunisia      ← duplicate
 
         We drop the second occurrence when it immediately follows (within 1 blank
-        line) a ### heading that already contains the same date information.
+        line) an entry heading that already contains the same date information.
         """
         result: list[str] = []
         i = 0
+        
+        bold_only = re.compile(r"^\*\*[^*]+\*\*\s*$")
 
         while i < len(lines):
             line = lines[i]
             result.append(line)
 
-            # After a ### heading, skip any immediately following duplicate date line
-            if line.startswith("### "):
-                heading_text = line[4:]
+            # After an entry heading, skip any immediately following duplicate date line
+            if " | " in line and bold_only.match(line):
+                heading_text = line.strip("* ")
                 j = i + 1
                 # Allow at most one blank line between heading and date line
                 if j < len(lines) and lines[j].strip() == "":
                     j += 1
                 if j < len(lines) and cls._DATE_LINE_RE.match(lines[j].strip()):
                     date_candidate = lines[j].strip()
-                    # Check if this date info is already embedded in the ### heading
+                    # Check if this date info is already embedded in the entry heading
                     if any(part.strip() in heading_text for part in date_candidate.split("|")):
                         i = j + 1  # skip the duplicate
                         continue
