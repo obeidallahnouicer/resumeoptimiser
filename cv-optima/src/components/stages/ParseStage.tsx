@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { CheckCircle2, Briefcase, GraduationCap, Code2, Loader2, AlertCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
-import { parseCv, normalizeJob, ocrToMarkdown, ApiError } from '../../api';
+import { parseCv, normalizeJob, ApiError } from '../../api';
 
 interface ParseStageProps { onComplete: () => void; }
 
@@ -26,17 +26,17 @@ export function ParseStage({ onComplete }: ParseStageProps) {
     calledRef.current = true;
     (async () => {
       try {
-        // Run parse + markdown conversion in parallel — both use the raw CV text.
-        // ocrToMarkdown is now fully deterministic (no LLM), so it's safe to call
-        // concurrently with parseCv. The markdown is the faithful original_cv.md.
-        const [cv, job, mdResult] = await Promise.all([
+        // parseCv now runs deterministic OCR→Markdown internally first,
+        // then sends the clean Markdown to the LLM for metadata extraction.
+        // The resulting Markdown is attached as cv.markdown — no separate
+        // ocrToMarkdown call needed.
+        const [cv, job] = await Promise.all([
           parseCv(cvText),
           normalizeJob(jobText),
-          ocrToMarkdown(cvText),
         ]);
         setStructuredCV(cv);
         setStructuredJob(job);
-        setOriginalMarkdown(mdResult.markdown);
+        setOriginalMarkdown(cv.markdown);  // populated by the parser now
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : 'Parsing failed.';
         setErrorMsg(msg); setError(msg);
