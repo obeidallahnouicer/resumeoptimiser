@@ -4,7 +4,7 @@ install:
 	pip install -e ".[dev]"
 
 dev:
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --timeout-keep-alive 600
 
 lint:
 	ruff check app tests
