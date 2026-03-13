@@ -48,6 +48,12 @@ class LLMError(AppError):
     code = "LLM_ERROR"
 
 
+class LLMTimeoutError(LLMError):
+    """Raised when the LLM call exceeds the configured timeout."""
+
+    code = "LLM_TIMEOUT"
+
+
 class ValidationError(AppError):
     """Raised when a domain object fails business-rule validation."""
 

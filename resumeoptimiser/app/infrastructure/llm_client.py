@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import json
 import re
+from itertools import cycle
 from typing import Protocol, runtime_checkable
 
-from openai import OpenAI, APIError
+from openai import OpenAI, APIError, APITimeoutError
 
-from app.core.config import LLMSettings
-from app.core.exceptions import LLMError
+from app.core.config import LLMProviderConfig
+from app.core.exceptions import LLMError, LLMTimeoutError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -42,7 +43,7 @@ _THINK_TAIL_RE = re.compile(r"^.*?</think>", re.DOTALL)
 
 # The model often wraps JSON in markdown fences (```json … ```) despite
 # being told not to.  Strip them so agents can call json.loads() directly.
-_MD_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?(.*?)\n?```$", re.DOTALL)
+_MD_FENCE_RE = re.compile(r"```[a-zA-Z]*\n?(.*?)\n?```", re.DOTALL)
 
 
 def _strip_think(text: str) -> str:
@@ -56,9 +57,52 @@ def _strip_think(text: str) -> str:
 
 
 def _strip_markdown_fence(text: str) -> str:
-    """Unwrap ```json … ``` or ``` … ``` fences if present."""
-    m = _MD_FENCE_RE.match(text.strip())
-    return m.group(1).strip() if m else text
+    """Unwrap ```json … ``` or ``` … ``` fences, or find the first JSON-like block.
+    
+    This is more robust than just stripping fences, as it handles responses that
+    contain conversational text before or after the JSON structure.
+    """
+    cleaned = text.strip()
+    
+    # 1. Try markdown fences (preferred as they are explicit)
+    m = _MD_FENCE_RE.search(cleaned)
+    if m:
+        return m.group(1).strip()
+    
+    # 2. Try finding the outermost { } or [ ] block
+    start_brace = cleaned.find("{")
+    start_bracket = cleaned.find("[")
+    
+    # Check which one appears first
+    if start_brace != -1 and (start_bracket == -1 or start_brace < start_bracket):
+        end_brace = cleaned.rfind("}")
+        if end_brace > start_brace:
+            return cleaned[start_brace:end_brace + 1].strip()
+    elif start_bracket != -1:
+        end_bracket = cleaned.rfind("]")
+        if end_bracket > start_bracket:
+            return cleaned[start_bracket:end_bracket + 1].strip()
+
+    return cleaned
+
+
+def _strip_chat_artifacts(text: str) -> str:
+    """Strip '### Response:' and other conversational filler from the LLM."""
+    # 1. strip template headers (e.g., DeepSeek / Llama)
+    text = re.sub(
+        r"^\s*(?:###?\s*)?(?:Assistant|Response|Output|Result|Thought|Answer|JSON|Markdown)s*\s*:?[ \t]*\n*", 
+        "", 
+        text, 
+        flags=re.IGNORECASE
+    )
+    # 2. strip conversational preamble
+    text = re.sub(
+        r"^\s*(?:Here is|Here's|Sure,|Okay,|Certainly,|I have|Below is|The following is|Here are).*?:\s*\n*",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+    return text.strip()
 
 
 def _repair_json(text: str) -> str:
@@ -138,47 +182,69 @@ def _repair_json(text: str) -> str:
 class LLMClientProtocol(Protocol):
     """Structural protocol for any LLM client."""
 
-    def complete(self, system: str, user: str) -> str:
-        """Return the assistant reply as a plain string."""
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
+        """Return the assistant reply as a plain string.
+
+        Args:
+            user: User message.
+            system: System prompt (optional, defaults to empty).
+            max_tokens: Override the default max_tokens for this call only.
+                        If None, the value from LLMSettings is used.
+        """
         ...
 
 
 class OpenAILLMClient:
     """Concrete LLM client backed by any OpenAI-compatible Chat Completions API.
 
-    Works with OpenAI, NVIDIA NIM, or any other provider that exposes
-    the same ``/v1/chat/completions`` interface.
-
-    Currently configured for the NVIDIA NIM ``openai/gpt-oss-120b`` model
-    which supports proper ``system`` and ``user`` roles.
+    Works with OpenRouter, NVIDIA NIM, or any other provider that exposes
+    the same ``/v1/chat/completions`` interface. The actual provider/model
+    come from the injected ``LLMProviderConfig``.
 
     Any ``<think>…</think>`` reasoning blocks are still stripped as a safety
     net in case a model emits them.
     """
 
-    def __init__(self, settings: LLMSettings) -> None:
+    def __init__(self, settings: LLMProviderConfig) -> None:
         self._settings = settings
         self._client = OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url if settings.base_url else None,
+            # Apply a wall-clock timeout so LLM calls never hang indefinitely.
+            # timeout=0 means no limit (useful for local models without rate limits).
+            timeout=settings.timeout if settings.timeout > 0 else None,
+            # Disable built-in SDK retries — we handle retries ourselves per-agent,
+            # and silent SDK retries cause multi-minute hangs on 5xx responses.
+            max_retries=0,
         )
 
-    def complete(self, system: str, user: str) -> str:
-        """Send a chat request and return the clean response text."""
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
+        """Send a chat request and return the clean response text.
+
+        Args:
+            user: User message.
+            system: System prompt (optional).
+            max_tokens: Per-call override. Falls back to ``LLMSettings.max_tokens``.
+        """
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
+
+        effective_max_tokens = max_tokens if max_tokens is not None else self._settings.max_tokens
 
         try:
             response = self._client.chat.completions.create(
                 model=self._settings.model,
                 temperature=self._settings.temperature,
                 top_p=self._settings.top_p,
-                max_tokens=self._settings.max_tokens,
+                max_tokens=effective_max_tokens,
                 stream=False,
                 messages=messages,
             )
+        except APITimeoutError as exc:
+            logger.error("llm_timeout", timeout=self._settings.timeout)
+            raise LLMTimeoutError(f"LLM request timed out after {self._settings.timeout}s") from exc
         except APIError as exc:
             logger.error("llm_api_error", error=str(exc))
             raise LLMError(str(exc)) from exc
@@ -197,13 +263,55 @@ class OpenAILLMClient:
 
         # Strip <think>…</think> reasoning blocks (safety net)
         text = _strip_think(text)
+        # Strip common conversational artifacts like '### Response:'
+        text = _strip_chat_artifacts(text)
         # Unwrap ```json … ``` markdown fences the model adds despite instructions
         text = _strip_markdown_fence(text)
         # Attempt to repair truncated JSON (e.g. when max_tokens is hit)
         text = _repair_json(text)
 
         if not text:
+            logger.error("llm_empty_after_cleaning", raw_length=len(response.choices[0].message.content or ""))
             raise LLMError("LLM returned empty content after stripping reasoning blocks.")
 
-        logger.debug("llm_response", chars=len(text), preview=text[:120])
+        logger.debug("llm_response_received", chars=len(text), preview=text[:120])
         return text
+
+
+class RotatingLLMClient:
+    """Round-robin LLM client that rotates through configured providers.
+
+    Attempts each provider in order (cycling for successive calls). If a provider
+    fails, it automatically falls back to the next one and aggregates errors when
+    all providers fail.
+    
+    Implements LLMClientProtocol for seamless agent injection.
+    """
+
+    def __init__(self, providers: list[LLMProviderConfig]) -> None:
+        if not providers:
+            raise ValueError("At least one LLM provider must be configured.")
+
+        self._providers = providers
+        self._clients: list[tuple[str, OpenAILLMClient]] = [
+            (provider.name, OpenAILLMClient(provider)) for provider in providers
+        ]
+
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
+        errors = []
+        attempts = len(self._clients)
+
+        # Always start from index 0 (preferred provider: OpenRouter)
+        for idx in range(attempts):
+            provider_name, client = self._clients[idx]
+            try:
+                logger.info("llm_provider_selected", provider=provider_name)
+                return client.complete(user, system=system, max_tokens=max_tokens)
+            except (LLMError, LLMTimeoutError) as exc:
+                logger.warning(
+                    "llm_provider_failed", provider=provider_name, error=str(exc)
+                )
+                errors.append(f"{provider_name}: {exc}")
+                continue
+
+        raise LLMError("All LLM providers failed: " + " | ".join(errors))

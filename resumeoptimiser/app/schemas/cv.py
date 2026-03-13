@@ -29,6 +29,11 @@ class StructuredCVSchema(BaseModel):
     sections: list[CVSectionSchema] = Field(default_factory=list)
     raw_text: str = ""
 
+    # ── Deterministic Markdown produced during parsing ───────────────
+    # Populated by CVParserAgent so callers never need a separate
+    # /to-markdown round-trip. Empty string when not yet generated.
+    markdown: str = Field(default="", description="Deterministic OCR→Markdown of the CV.")
+
     # ── Enriched fields (populated by the improved parser) ──────────
     detected_language: str = Field(default="en", description="ISO 639-1 code: en, fr, …")
     hard_skills: list[str] = Field(default_factory=list)

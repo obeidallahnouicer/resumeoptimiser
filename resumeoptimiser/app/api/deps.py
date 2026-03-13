@@ -16,13 +16,15 @@ from app.agents.cv_rewriter import CVRewriteAgent
 from app.agents.cv_validator import CVValidatorAgent
 from app.agents.job_normalizer import JobNormalizerAgent
 from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
+from app.agents.markdown_rewriter import MarkdownRewriteAgent
+from app.agents.ocr_to_markdown import OCRToMarkdownAgent
 from app.agents.report_generator import ReportGeneratorAgent
 from app.agents.rescorer import RescoreAgent
 from app.agents.score_explainer import ScoreExplainerAgent
 from app.agents.semantic_matcher import SemanticMatcherAgent
 from app.core.config import AppSettings, get_settings
 from app.infrastructure.embedding_client import SentenceTransformerEmbeddingClient
-from app.infrastructure.llm_client import OpenAILLMClient
+from app.infrastructure.llm_client import RotatingLLMClient
 from app.services.optimization_service import OptimizationService
 
 # ---------------------------------------------------------------------------
@@ -31,7 +33,13 @@ from app.services.optimization_service import OptimizationService
 # ---------------------------------------------------------------------------
 
 _settings = get_settings()
-_llm_client = OpenAILLMClient(_settings.llm)
+_provider_configs = _settings.llm.provider_configs()
+if not _provider_configs:
+    raise RuntimeError(
+        "No LLM providers configured. Set LLM_OPENROUTER_API_KEY or LLM_API_KEY/LLM_NVIDIA_API_KEY."
+    )
+
+_llm_client = RotatingLLMClient(_provider_configs)
 _embedding_client = SentenceTransformerEmbeddingClient(_settings.embedding)
 
 _matcher_agent = SemanticMatcherAgent(embedding_client=_embedding_client)
@@ -48,6 +56,9 @@ _optimization_service = OptimizationService(
     validator=CVValidatorAgent(),
     rescorer=_rescorer_agent,
     report_generator=ReportGeneratorAgent(llm=_llm_client),
+    # Markdown-safe pipeline agents
+    ocr_to_markdown=OCRToMarkdownAgent(llm=_llm_client),
+    markdown_rewriter=MarkdownRewriteAgent(llm=_llm_client),
 )
 
 

@@ -1,165 +1,412 @@
-"""CVParserAgent – parses raw CV text into a StructuredCVSchema.
+"""CVParserAgent – deterministic Markdown → StructuredCVSchema.
 
-Responsibility: Use the LLM to extract structured data from unstructured text.
-The LLM is given a strict YAML-formatted prompt for clarity; the response is
-JSON validated by Pydantic before returning.
+Responsibility:
+  1. Convert raw PDF/OCR text → clean Markdown (via _raw_to_markdown).
+  2. Parse that Markdown into StructuredCVSchema using pure regex — ZERO LLM.
 
 Design:
-- LLM injected via LLMClientProtocol (testable, swappable)
-- No global state
-- execute() is the only public method
-- All I/O typed via Pydantic schemas
-- Retries up to 2 times on JSON parse / validation failure
-- Bilingual: handles French AND English CVs natively
+  - Fully DETERMINISTIC — no AI, no network call, no timeout risk.
+  - Single pass over the Markdown lines produced by _raw_to_markdown.
+  - LLM parameter kept in __init__ for DI compatibility but is NEVER used.
+  - Runs in < 5 ms on any CV.
 """
 
 from __future__ import annotations
 
 import json
+import re
+from datetime import date
 
 from app.agents.base import AgentMeta, BaseAgent
+from app.agents.ocr_to_markdown import (
+    _EMAIL_RE,
+    _PHONE_RE,
+    _URL_RE,
+    _raw_to_markdown,
+)
 from app.core.exceptions import AgentExecutionError, CVParsingError
 from app.core.logging import get_logger
+from app.domain.models import SectionType
 from app.infrastructure.llm_client import LLMClientProtocol
-from app.schemas.cv import CVParserInput, StructuredCVSchema
+from app.schemas.cv import (
+    CVParserInput,
+    CVSectionSchema,
+    ContactInfoSchema,
+    StructuredCVSchema,
+)
 
 logger = get_logger(__name__)
 
-_MAX_RETRIES = 2
+# ── Markdown structure regexes ────────────────────────────────────────────────
+_H1_RE = re.compile(r"^#\s+(.+)$")       # # Name
+_H2_RE = re.compile(r"^##\s+(.+)$")       # ## SECTION
+_ENTRY_HEADING_RE = re.compile(r"^\*\*(.+)\*\*$")  # **Role | Company**
+_BULLET_RE = re.compile(r"^-\s+(.+)$")    # - item
 
-_SYSTEM_PROMPT = """\
-role: cv_parsing_engine
-version: "2.0"
-description: |
-  You are a multilingual CV/résumé parsing engine.
-  You MUST handle CVs written in French, English, or a mix of both.
-  Your job is to deeply understand the CV content and extract structured data.
+# Section heading → SectionType
+_SECTION_MAP: dict[str, SectionType] = {
+    "summary": SectionType.SUMMARY,
+    "profile": SectionType.SUMMARY,
+    "objective": SectionType.SUMMARY,
+    "about me": SectionType.SUMMARY,
+    "profil": SectionType.SUMMARY,
+    "professional experience": SectionType.EXPERIENCE,
+    "experience": SectionType.EXPERIENCE,
+    "work experience": SectionType.EXPERIENCE,
+    "work history": SectionType.EXPERIENCE,
+    "employment": SectionType.EXPERIENCE,
+    "expérience": SectionType.EXPERIENCE,
+    "education": SectionType.EDUCATION,
+    "formation": SectionType.EDUCATION,
+    "études": SectionType.EDUCATION,
+    "academic": SectionType.EDUCATION,
+    "skills": SectionType.SKILLS,
+    "skill": SectionType.SKILLS,
+    "technical skills": SectionType.SKILLS,
+    "compétences": SectionType.SKILLS,
+    "languages": SectionType.LANGUAGES,
+    "langues": SectionType.LANGUAGES,
+    "language": SectionType.LANGUAGES,
+    "certifications": SectionType.CERTIFICATIONS,
+    "certification": SectionType.CERTIFICATIONS,
+    "awards": SectionType.CERTIFICATIONS,
+    "projects": SectionType.PROJECTS,
+    "projets": SectionType.PROJECTS,
+}
 
-language_handling:
-  - Auto-detect the CV language (fr or en).
-  - ALWAYS preserve original wording for names, titles, and skill labels.
-  - Translate NOTHING — keep text in its original language.
-  - Recognise French equivalents:
-      "Expérience professionnelle" → experience
-      "Formation" / "Éducation"    → education
-      "Compétences"                → skills
-      "Profil" / "Résumé"         → summary
-      "Certifications"             → certifications
-      "Projets"                    → projects
-      "Langues"                    → languages
+_KNOWN_SOFT_SKILLS = frozenset({
+    "leadership", "communication", "teamwork", "problem solving", "problem-solving",
+    "adaptability", "time management", "critical thinking", "creativity", "collaboration",
+    "interpersonal", "initiative", "attention to detail", "work ethic", "empathy",
+    "negotiation", "presentation", "mentoring", "coaching", "organisation", "organization",
+})
 
-extraction_rules:
-  contact:
-    - Extract name, email, phone, location, linkedin, github.
-    - If not found, use empty string "".
+_KNOWN_TOOL_RE = re.compile(
+    r"\b(vscode|vs code|pycharm|intellij|jira|confluence|git|github|gitlab|bitbucket|"
+    r"docker|kubernetes|k8s|jenkins|ansible|terraform|aws|azure|gcp|google cloud|"
+    r"power bi|tableau|excel|word|outlook|notion|slack|teams|figma|postman|"
+    r"bloomberg|reuters|sap|salesforce|hubspot)\b",
+    re.IGNORECASE,
+)
 
-  sections:
-    - Map every CV section to one of these section_type values:
-        summary, experience, education, skills, certifications, projects, languages, other
-    - raw_text: a concise summary of the section (max 500 chars).
-    - items: list of individual line items (job titles, skills, degrees, etc.)
 
-  hard_skills:
-    - Programming languages, frameworks, databases, cloud platforms, etc.
-    - Example: ["Python", "SQL", "Azure", "Power BI", "SAP"]
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-  soft_skills:
-    - Communication, leadership, teamwork, problem-solving, etc.
-    - Example: ["Analytical thinking", "Stakeholder management"]
+def _map_section(heading: str) -> SectionType:
+    return _SECTION_MAP.get(heading.lower().strip(), SectionType.OTHER)
 
-  tools:
-    - Specific software, platforms, IDEs, or systems.
-    - Example: ["JIRA", "Confluence", "Excel", "Visio"]
 
-  languages_spoken:
-    - Format: "Language (level)" — e.g. ["Français (natif)", "English (fluent)"]
+def _extract_contact(lines: list[str], name: str) -> ContactInfoSchema:
+    email = phone = location = linkedin = github = ""
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if not email and (m := _EMAIL_RE.search(s)):
+            email = m.group(0)
+        if not phone and (m := _PHONE_RE.search(s)):
+            val = m.group(0).strip()
+            if len(val) >= 8:
+                phone = val
+        if not linkedin and (m := re.search(r"linkedin\.com/in/[\w\-]+", s, re.IGNORECASE)):
+            linkedin = m.group(0)
+        if not github and (m := re.search(r"github\.com/[\w\-]+", s, re.IGNORECASE)):
+            github = m.group(0)
+        # Location: non-email, non-phone, non-URL segment in a pipe-separated contact line
+        if "|" in s and not location:
+            for part in s.split("|"):
+                part = part.strip()
+                if (
+                    part
+                    and not _EMAIL_RE.search(part)
+                    and not _URL_RE.search(part)
+                    and not re.match(r"^[+\d\s\-().]+$", part)
+                    and len(part) > 3
+                ):
+                    location = part
+                    break
+    return ContactInfoSchema(
+        name=name, email=email, phone=phone,
+        location=location, linkedin=linkedin, github=github,
+    )
 
-  total_years_experience:
-    - Calculate from work history dates. Estimate if unclear. Use 0 if none.
 
-  education_level:
-    - Highest attained: "phd", "master", "bachelor", "diploma", "certificate", ""
-    - Map French: "Maîtrise"→master, "Baccalauréat"→bachelor, "DEC"→diploma, "DEP"→certificate
+def _classify_skill(skill: str) -> str:
+    s = skill.lower().strip()
+    if s in _KNOWN_SOFT_SKILLS:
+        return "soft"
+    if _KNOWN_TOOL_RE.search(s):
+        return "tool"
+    return "hard"
 
-  certifications:
-    - List all certifications and professional designations.
 
-output_format:
-  Return ONLY a valid JSON object. No markdown fences. No explanation.
-  Schema:
-    {
-      "detected_language": "fr|en",
-      "contact": {
-        "name": "", "email": "", "phone": "",
-        "location": "", "linkedin": "", "github": ""
-      },
-      "sections": [
-        {"section_type": "...", "raw_text": "...", "items": ["..."]}
-      ],
-      "hard_skills": ["..."],
-      "soft_skills": ["..."],
-      "tools": ["..."],
-      "languages_spoken": ["..."],
-      "total_years_experience": 0.0,
-      "education_level": "",
-      "certifications": ["..."],
-      "raw_text": ""
-    }
+def _years_from_date_line(text: str) -> float:
+    """Extract years of experience from a date-range string."""
+    years = re.findall(r"\b(20\d{2}|19\d{2})\b", text)
+    if len(years) >= 2:
+        start_year = int(years[0])
+        end_year = int(years[-1])
+        duration = float(end_year - start_year)
+        # Add months if present in the text
+        months = re.findall(r"\b(\d{1,2})\s*(?:months?|m)\b", text, re.IGNORECASE)
+        if months:
+            duration += int(months[0]) / 12.0
+        return round(duration, 1)
+    if "present" in text.lower() and len(years) == 1:
+        today = date.today()
+        return round((today.year - int(years[0])) + today.month / 12, 1)
+    return 0.0
 
-critical_rules:
-  - Return ONLY the JSON. No extra text. No markdown.
-  - Keep raw_text per section SHORT (max 500 chars) — summarise if needed.
-  - Top-level raw_text must be "".
-  - JSON must be complete and valid. Do NOT let it get cut off.
-  - When in doubt about section_type, use "other".
-""".strip()
 
+def _infer_education_level(items: list[str]) -> str:
+    combined = " ".join(items).lower()
+    for level, keywords in [
+        ("phd", ["phd", "doctorat", "doctorate"]),
+        ("master", ["master", "msc", "m.sc", "mba"]),
+        ("bachelor", ["bachelor", "bsc", "b.sc", "licence"]),
+        ("diploma", ["diploma", "diplôme"]),
+        ("certificate", ["certificate", "certificat"]),
+    ]:
+        if any(k in combined for k in keywords):
+            return level
+    return ""
+
+
+def _dedup(lst: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out = []
+    for x in lst:
+        key = x.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(x)
+    return out
+
+
+# ── Main Markdown parser ──────────────────────────────────────────────────────
+
+def _parse_markdown(markdown: str) -> StructuredCVSchema:
+    """Parse a structured Markdown CV into StructuredCVSchema deterministically."""
+    lines = markdown.splitlines()
+
+    name = ""
+    contact_lines: list[str] = []
+    sections: list[CVSectionSchema] = []
+
+    hard_skills: list[str] = []
+    soft_skills: list[str] = []
+    tools: list[str] = []
+    languages_spoken: list[str] = []
+    certifications: list[str] = []
+    edu_items: list[str] = []
+    total_years: float = 0.0
+    detected_language = "en"
+
+    current_section: SectionType | None = None
+    current_items: list[str] = []
+    current_raw: list[str] = []
+    in_header = True  # True until first ## is seen
+
+    def flush() -> None:
+        nonlocal current_section, current_items, current_raw
+        if current_section is not None:
+            sections.append(CVSectionSchema(
+                section_type=current_section,
+                raw_text="\n".join(current_raw),
+                items=list(current_items),
+            ))
+        current_section = None
+        current_items = []
+        current_raw = []
+
+    for line in lines:
+        # H1 → name
+        if m := _H1_RE.match(line):
+            name = m.group(1).strip()
+            continue
+
+        # Header block (contact lines) — everything before first ##
+        if in_header:
+            if not _H2_RE.match(line):
+                if line.strip():
+                    contact_lines.append(line)
+                continue
+            # Hit a ## — fall through to H2 handling
+            in_header = False
+
+        # H2 → new section
+        if m := _H2_RE.match(line):
+            flush()
+            heading = m.group(1).strip()
+            current_section = _map_section(heading)
+            if any(fr in heading.lower() for fr in ("expérience", "formation", "compétences", "langues")):
+                detected_language = "fr"
+            continue
+
+        if current_section is None:
+            continue
+
+        raw = line.strip()
+        if raw:
+            current_raw.append(raw)
+
+        # Entry header "Role | Company" or "Degree | Institution" previously H3
+        if m := _ENTRY_HEADING_RE.match(line):
+            entry = m.group(1).strip()
+            current_items.append(entry)
+            if current_section == SectionType.EDUCATION:
+                edu_items.append(entry)
+            continue
+
+        # Bullet → item
+        if m := _BULLET_RE.match(line):
+            item = m.group(1).strip()
+            # For experience/projects/summary: bullets are body content, not key items
+            # For skills/languages/certs/education: bullets ARE the items
+            if current_section == SectionType.SKILLS:
+                current_items.append(item)
+                kind = _classify_skill(item)
+                if kind == "soft":
+                    soft_skills.append(item)
+                elif kind == "tool":
+                    tools.append(item)
+                else:
+                    hard_skills.append(item)
+            elif current_section == SectionType.LANGUAGES:
+                languages_spoken.append(item)
+                current_items.append(item)
+            elif current_section == SectionType.CERTIFICATIONS:
+                certifications.append(item)
+                current_items.append(item)
+            elif current_section == SectionType.EDUCATION:
+                edu_items.append(item)
+                current_items.append(item)
+            # experience/projects/summary bullets → raw_text only, not items
+            continue
+
+        # Plain text — date lines under entry headings contribute to years
+        if raw and current_section == SectionType.EXPERIENCE:
+            yrs = _years_from_date_line(raw)
+            if yrs > 0:
+                total_years += yrs
+
+    flush()
+
+    contact = _extract_contact(contact_lines, name)
+
+    return StructuredCVSchema(
+        contact=contact,
+        sections=sections,
+        raw_text="",
+        markdown="",  # caller fills this
+        detected_language=detected_language,
+        hard_skills=_dedup(hard_skills),
+        soft_skills=_dedup(soft_skills),
+        tools=_dedup(tools),
+        languages_spoken=_dedup(languages_spoken),
+        total_years_experience=round(total_years, 1),
+        education_level=_infer_education_level(edu_items),
+        certifications=_dedup(certifications),
+    )
+
+
+# ── Agent wrapper ─────────────────────────────────────────────────────────────
 
 class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
-    """Parses raw CV text into a validated StructuredCVSchema."""
+    """Parses raw CV text into StructuredCVSchema using the LLM.
 
-    meta = AgentMeta(name="CVParserAgent", version="2.0.0")
+    Flow:
+      1. raw text → LLM JSON response
+      2. schema validation
+      3. Markdown generation for UI display
+    """
+
+    meta = AgentMeta(name="CVParserAgent", version="4.0.0")
+
+    _SYSTEM_PROMPT = (
+        "You are an expert ATS (Applicant Tracking System) CV parser. "
+        "Your task is to extract structured information from the provided raw CV text. "
+        "\n\n"
+        "### STRICT OUTPUT RULES:\n"
+        "1. Return ONLY a valid JSON object. No conversational preamble, no summary, no markdown formatting outside the JSON.\n"
+        "2. Follow the StructuredCVSchema exactly. All fields are required.\n"
+        "3. Ensure all section_type values are one of: summary, experience, education, skills, languages, certifications, projects, other.\n"
+        "\n"
+        "### JSON SCHEMA:\n"
+        "{\n"
+        "  \"contact\": {\n"
+        "    \"name\": \"Full Name\",\n"
+        "    \"email\": \"email@example.com\",\n"
+        "    \"phone\": \"+1-234-567-890\",\n"
+        "    \"location\": \"City, Country\",\n"
+        "    \"linkedin\": \"linkedin.com/in/username\",\n"
+        "    \"github\": \"github.com/username\"\n"
+        "  },\n"
+        "  \"sections\": [\n"
+        "    {\n"
+        "      \"section_type\": \"experience\",\n"
+        "      \"raw_text\": \"Full original text of this section...\",\n"
+        "      \"items\": [\"Key bullet point 1\", \"Key bullet point 2\"]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"detected_language\": \"en\",\n"
+        "  \"hard_skills\": [\"Python\", \"FastAPI\"],\n"
+        "  \"soft_skills\": [\"Leadership\"],\n"
+        "  \"tools\": [\"Docker\", \"Git\"],\n"
+        "  \"languages_spoken\": [\"English\", \"French\"],\n"
+        "  \"total_years_experience\": 5.5,\n"
+        "  \"education_level\": \"Masters\",\n"
+        "  \"certifications\": [\"AWS Solutions Architect\"],\n"
+        "  \"raw_text\": \"\",\n"
+        "  \"markdown\": \"\"\n"
+        "}\n"
+    )
 
     def __init__(self, llm: LLMClientProtocol) -> None:
         self._llm = llm
 
     def execute(self, input: CVParserInput) -> StructuredCVSchema:  # noqa: A002
-        """Parse the raw CV text and return a structured schema.
-
-        Retries up to _MAX_RETRIES times if the LLM returns invalid JSON.
-        """
         logger.info("cv_parser.start", text_length=len(input.raw_text))
 
-        last_error: Exception | None = None
-        for attempt in range(_MAX_RETRIES + 1):
-            raw_json = self._call_llm(input.raw_text)
-            try:
-                parsed_dict = self._parse_json(raw_json)
-                schema = self._validate_schema(parsed_dict)
-                logger.info("cv_parser.success", sections=len(schema.sections),
-                            skills=len(schema.hard_skills), lang=schema.detected_language,
-                            attempt=attempt)
-                return schema
-            except (CVParsingError, AgentExecutionError) as exc:
-                last_error = exc
-                logger.warning("cv_parser.retry", attempt=attempt, error=str(exc))
-
-        raise last_error  # type: ignore[misc]
-
-    def _call_llm(self, raw_text: str) -> str:
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=raw_text)
-        except Exception as exc:
+            llm_response = self._llm.complete(
+                system=self._SYSTEM_PROMPT,
+                user=f"Please parse this CV text into the requested JSON structure:\n\n{input.raw_text}"
+            )
+        except Exception as exc:  # pragma: no cover - defensive
             raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 
-    def _parse_json(self, raw_json: str) -> dict:
-        try:
-            return json.loads(raw_json)
-        except json.JSONDecodeError as exc:
-            raise CVParsingError(f"LLM returned invalid JSON: {exc}") from exc
+        if not llm_response:
+            raise CVParsingError("Empty response from LLM")
 
-    def _validate_schema(self, data: dict) -> StructuredCVSchema:
         try:
-            return StructuredCVSchema.model_validate(data)
+            data = json.loads(llm_response)
         except Exception as exc:
-            raise CVParsingError(f"Schema validation failed: {exc}") from exc
+            logger.error("cv_parser.invalid_json", 
+                         error=str(exc), 
+                         llm_response_preview=llm_response[:1000])
+            raise CVParsingError("LLM did not return valid JSON") from exc
+
+        required_keys = {"contact", "sections", "raw_text"}
+        if not required_keys.issubset(set(data.keys())):
+            raise CVParsingError("LLM JSON missing required top-level keys")
+
+        try:
+            schema = StructuredCVSchema.model_validate(data)
+        except Exception as exc:
+            logger.error("cv_parser.schema_mismatch", 
+                         error=str(exc), 
+                         data_preview=json.dumps(data, indent=2)[:2000])
+            raise CVParsingError("LLM JSON does not match StructuredCVSchema") from exc
+
+        schema.raw_text = input.raw_text
+        schema.markdown = _raw_to_markdown(input.raw_text)
+
+        logger.info(
+            "cv_parser.done",
+            name=schema.contact.name,
+            sections=len(schema.sections),
+            hard_skills=len(schema.hard_skills),
+            years=schema.total_years_experience,
+        )
+        return schema

@@ -543,18 +543,32 @@ useEffect(() => {
 
 ## Configuration
 
-All settings use `pydantic-settings` and are loaded from a `.env` file in the `resumeoptimiser/` directory.
+All settings use `pydantic-settings` and are loaded from a `.env` file in the `resumeoptimiser/` directory. The LLM client now supports **provider rotation** (OpenRouter → NVIDIA) so we can keep shipping even when one key is throttled.
 
 ```mermaid
 classDiagram
     class LLMSettings {
-        provider = "nvidia"
-        base_url = "https://integrate.api.nvidia.com/v1"
-        model = "openai/gpt-oss-120b"
-        api_key: str
+        # Shared knobs
         temperature = 1.0
         top_p = 1.0
         max_tokens = 4096
+        timeout = 120s
+
+        # OpenRouter (preferred)
+        openrouter_api_key: str
+        openrouter_base_url = "https://openrouter.ai/api/v1"
+        openrouter_model = "openrouter/free"
+
+        # NVIDIA (kept for fallback)
+        nvidia_api_key: str
+        nvidia_base_url = "https://integrate.api.nvidia.com/v1"
+        nvidia_model = "openai/gpt-oss-120b"
+
+        # Legacy single-provider fallback
+        provider = "nvidia"
+        api_key: str
+        base_url
+        model
     }
     class EmbeddingSettings {
         model = "BAAI/bge-base-en-v1.5"
@@ -577,7 +591,7 @@ classDiagram
 ### Prerequisites
 - Python ≥ 3.11
 - Node.js ≥ 18
-- A NVIDIA NIM API key
+- An OpenRouter API key (preferred) and optionally a NVIDIA NIM key for fallback
 
 ### Backend
 
@@ -586,7 +600,7 @@ cd resumeoptimiser
 
 # create .env
 cp .env.example .env
-# fill in LLM_API_KEY=nvapi-...
+# fill in LLM_OPENROUTER_API_KEY=sk-or-... (and optionally LLM_NVIDIA_API_KEY=nvapi-...)
 
 # install
 pip install -e ".[dev]"
@@ -633,10 +647,17 @@ Test files:
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_API_KEY` | *(required)* | NVIDIA NIM API key |
-| `LLM_MODEL` | `openai/gpt-oss-120b` | LLM model name |
-| `LLM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | LLM provider base URL |
+| `LLM_OPENROUTER_API_KEY` | *(required for OpenRouter)* | OpenRouter API key (preferred primary, uses `openrouter/free`) |
+| `LLM_OPENROUTER_MODEL` | `openrouter/free` | Override the OpenRouter model name |
+| `LLM_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
+| `LLM_NVIDIA_API_KEY` | *(optional fallback)* | NVIDIA NIM API key (used for rotation/failover) |
+| `LLM_NVIDIA_MODEL` | `openai/gpt-oss-120b` | NVIDIA model name |
+| `LLM_NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NVIDIA base URL |
+| `LLM_API_KEY` | *(legacy fallback)* | Legacy single-provider key if you don't use the above slots |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Legacy model name for single-provider mode |
+| `LLM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Legacy base URL for single-provider mode |
 | `LLM_TEMPERATURE` | `1.0` | Sampling temperature |
+| `LLM_TOP_P` | `1.0` | nucleus sampling |
 | `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
 | `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | HuggingFace embedding model |
 | `EMBEDDING_DEVICE` | `cpu` | `cpu` or `cuda` |

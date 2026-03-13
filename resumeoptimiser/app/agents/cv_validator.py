@@ -65,6 +65,7 @@ class CVValidatorAgent(BaseAgent[CVValidatorInput, CVValidatorOutput]):
         violations.extend(self._check_required_sections(input.optimized))
         violations.extend(self._check_no_empty_sections(input.optimized))
         violations.extend(self._check_no_drastic_shrinkage(input.original, input.optimized))
+        violations.extend(self._check_contact_email(input.optimized))
         return violations
 
     def _section_type_str(self, section_type: object) -> str:
@@ -99,3 +100,9 @@ class CVValidatorAgent(BaseAgent[CVValidatorInput, CVValidatorOutput]):
                     f"Section '{self._section_type_str(section.section_type)}' shrank by more than 50%."
                 )
         return violations
+
+    def _check_contact_email(self, cv: OptimizedCVSchema) -> list[str]:
+        email = getattr(cv.contact, "email", "") or ""
+        if email.strip():
+            return []
+        return ["Contact email must not be empty."]

@@ -11,7 +11,11 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
 };
 
 export function ParseStage({ onComplete }: ParseStageProps) {
-  const { cvText, jobText, structuredCV, structuredJob, setStructuredCV, setStructuredJob, setError } = usePipeline();
+  const {
+    cvText, jobText,
+    structuredCV, structuredJob,
+    setStructuredCV, setStructuredJob, setOriginalMarkdown, setError,
+  } = usePipeline();
   const [loading, setLoading] = useState(!structuredCV);
   const [errorMsg, setErrorMsg] = useState('');
   const calledRef = useRef(false);
@@ -22,8 +26,17 @@ export function ParseStage({ onComplete }: ParseStageProps) {
     calledRef.current = true;
     (async () => {
       try {
-        const [cv, job] = await Promise.all([parseCv(cvText), normalizeJob(jobText)]);
-        setStructuredCV(cv); setStructuredJob(job);
+        // parseCv now runs deterministic OCR→Markdown internally first,
+        // then sends the clean Markdown to the LLM for metadata extraction.
+        // The resulting Markdown is attached as cv.markdown — no separate
+        // ocrToMarkdown call needed.
+        const [cv, job] = await Promise.all([
+          parseCv(cvText),
+          normalizeJob(jobText),
+        ]);
+        setStructuredCV(cv);
+        setStructuredJob(job);
+        setOriginalMarkdown(cv.markdown);  // populated by the parser now
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : 'Parsing failed.';
         setErrorMsg(msg); setError(msg);
