@@ -54,7 +54,7 @@ class LLMSettings(BaseSettings):
     max_tokens: int = Field(default=4096, gt=0)
     # Total wall-clock timeout (seconds) for a single LLM API call.
     # Covers connect + read. 0 = no timeout (not recommended).
-    timeout: float = Field(default=120.0, ge=0.0)
+    timeout: float = Field(default=300.0, ge=0.0)
 
     # OpenRouter (free tier) – preferred primary when available
     openrouter_api_key: str = Field(default="")
