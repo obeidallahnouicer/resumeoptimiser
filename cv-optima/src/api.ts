@@ -36,11 +36,12 @@ import type {
 const BASE = '/api/v1/pipeline';
 
 /** Timeout for LLM-backed stages (parse, match, explain, rewrite, compare). 
- * Increased to 300s to support heavy CV parsing tasks on free-tier models.
+ * Increased to 600s (10 mins) as multiple parallel requests + large CVs 
+ * can take significant time on free-tier models.
  */
-const LLM_TIMEOUT_MS = 300_000;
+const LLM_TIMEOUT_MS = 10000_000; // 10 minutes in milliseconds
 /** Timeout for fast/deterministic stages (extract, diff, render-pdf). */
-const FAST_TIMEOUT_MS = 60_000;
+const FAST_TIMEOUT_MS = 5000_000; // 5 minutes in milliseconds
 
 // ---------------------------------------------------------------------------
 // Error type
