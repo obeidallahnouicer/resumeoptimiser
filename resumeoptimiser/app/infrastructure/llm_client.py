@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import json
 import re
+from itertools import cycle
 from typing import Protocol, runtime_checkable
 
 from openai import OpenAI, APIError, APITimeoutError
 
-from app.core.config import LLMSettings
+from app.core.config import LLMProviderConfig
 from app.core.exceptions import LLMError, LLMTimeoutError
 from app.core.logging import get_logger
 
@@ -172,17 +173,15 @@ class LLMClientProtocol(Protocol):
 class OpenAILLMClient:
     """Concrete LLM client backed by any OpenAI-compatible Chat Completions API.
 
-    Works with OpenAI, NVIDIA NIM, or any other provider that exposes
-    the same ``/v1/chat/completions`` interface.
-
-    Currently configured for the NVIDIA NIM ``openai/gpt-oss-120b`` model
-    which supports proper ``system`` and ``user`` roles.
+    Works with OpenRouter, NVIDIA NIM, or any other provider that exposes
+    the same ``/v1/chat/completions`` interface. The actual provider/model
+    come from the injected ``LLMProviderConfig``.
 
     Any ``<think>…</think>`` reasoning blocks are still stripped as a safety
     net in case a model emits them.
     """
 
-    def __init__(self, settings: LLMSettings) -> None:
+    def __init__(self, settings: LLMProviderConfig) -> None:
         self._settings = settings
         self._client = OpenAI(
             api_key=settings.api_key,
@@ -252,3 +251,42 @@ class OpenAILLMClient:
 
         logger.debug("llm_response", chars=len(text), preview=text[:120])
         return text
+
+
+class RotatingLLMClient:
+    """Round-robin LLM client that rotates through configured providers.
+
+    Attempts each provider in order (cycling for successive calls). If a provider
+    fails, it automatically falls back to the next one and aggregates errors when
+    all providers fail.
+    """
+
+    def __init__(self, providers: list[LLMProviderConfig]) -> None:
+        if not providers:
+            raise ValueError("At least one LLM provider must be configured.")
+
+        self._providers = providers
+        self._clients: list[tuple[str, OpenAILLMClient]] = [
+            (provider.name, OpenAILLMClient(provider)) for provider in providers
+        ]
+        # cycle over indices so we advance per-request
+        self._index_cycle = cycle(range(len(self._clients)))
+
+    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+        errors: list[str] = []
+        attempts = len(self._clients)
+
+        for _ in range(attempts):
+            idx = next(self._index_cycle)
+            provider_name, client = self._clients[idx]
+            try:
+                logger.info("llm_provider_selected", provider=provider_name)
+                return client.complete(system, user, max_tokens=max_tokens)
+            except (LLMError, LLMTimeoutError) as exc:
+                logger.warning(
+                    "llm_provider_failed", provider=provider_name, error=str(exc)
+                )
+                errors.append(f"{provider_name}: {exc}")
+                continue
+
+        raise LLMError("All LLM providers failed: " + " | ".join(errors))
