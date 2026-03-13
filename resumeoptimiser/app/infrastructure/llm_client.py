@@ -57,9 +57,33 @@ def _strip_think(text: str) -> str:
 
 
 def _strip_markdown_fence(text: str) -> str:
-    """Unwrap ```json … ``` or ``` … ``` fences if present."""
-    m = _MD_FENCE_RE.search(text.strip())
-    return m.group(1).strip() if m else text
+    """Unwrap ```json … ``` or ``` … ``` fences, or find the first JSON-like block.
+    
+    This is more robust than just stripping fences, as it handles responses that
+    contain conversational text before or after the JSON structure.
+    """
+    cleaned = text.strip()
+    
+    # 1. Try markdown fences (preferred as they are explicit)
+    m = _MD_FENCE_RE.search(cleaned)
+    if m:
+        return m.group(1).strip()
+    
+    # 2. Try finding the outermost { } or [ ] block
+    start_brace = cleaned.find("{")
+    start_bracket = cleaned.find("[")
+    
+    # Check which one appears first
+    if start_brace != -1 and (start_bracket == -1 or start_brace < start_bracket):
+        end_brace = cleaned.rfind("}")
+        if end_brace > start_brace:
+            return cleaned[start_brace:end_brace + 1].strip()
+    elif start_bracket != -1:
+        end_bracket = cleaned.rfind("]")
+        if end_bracket > start_bracket:
+            return cleaned[start_bracket:end_bracket + 1].strip()
+
+    return cleaned
 
 
 def _strip_chat_artifacts(text: str) -> str:
@@ -158,12 +182,12 @@ def _repair_json(text: str) -> str:
 class LLMClientProtocol(Protocol):
     """Structural protocol for any LLM client."""
 
-    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
         """Return the assistant reply as a plain string.
 
         Args:
-            system: System prompt.
             user: User message.
+            system: System prompt (optional, defaults to empty).
             max_tokens: Override the default max_tokens for this call only.
                         If None, the value from LLMSettings is used.
         """
@@ -194,12 +218,12 @@ class OpenAILLMClient:
             max_retries=0,
         )
 
-    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
         """Send a chat request and return the clean response text.
 
         Args:
-            system: System prompt.
             user: User message.
+            system: System prompt (optional).
             max_tokens: Per-call override. Falls back to ``LLMSettings.max_tokens``.
         """
         messages: list[dict[str, str]] = []
@@ -247,9 +271,10 @@ class OpenAILLMClient:
         text = _repair_json(text)
 
         if not text:
+            logger.error("llm_empty_after_cleaning", raw_length=len(response.choices[0].message.content or ""))
             raise LLMError("LLM returned empty content after stripping reasoning blocks.")
 
-        logger.debug("llm_response", chars=len(text), preview=text[:120])
+        logger.debug("llm_response_received", chars=len(text), preview=text[:120])
         return text
 
 
@@ -259,6 +284,8 @@ class RotatingLLMClient:
     Attempts each provider in order (cycling for successive calls). If a provider
     fails, it automatically falls back to the next one and aggregates errors when
     all providers fail.
+    
+    Implements LLMClientProtocol for seamless agent injection.
     """
 
     def __init__(self, providers: list[LLMProviderConfig]) -> None:
@@ -269,19 +296,17 @@ class RotatingLLMClient:
         self._clients: list[tuple[str, OpenAILLMClient]] = [
             (provider.name, OpenAILLMClient(provider)) for provider in providers
         ]
-        # cycle over indices so we advance per-request
-        self._index_cycle = cycle(range(len(self._clients)))
 
-    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
-        errors: list[str] = []
+    def complete(self, user: str, *, system: str = "", max_tokens: int | None = None) -> str:
+        errors = []
         attempts = len(self._clients)
 
-        for _ in range(attempts):
-            idx = next(self._index_cycle)
+        # Always start from index 0 (preferred provider: OpenRouter)
+        for idx in range(attempts):
             provider_name, client = self._clients[idx]
             try:
                 logger.info("llm_provider_selected", provider=provider_name)
-                return client.complete(system, user, max_tokens=max_tokens)
+                return client.complete(user, system=system, max_tokens=max_tokens)
             except (LLMError, LLMTimeoutError) as exc:
                 logger.warning(
                     "llm_provider_failed", provider=provider_name, error=str(exc)
