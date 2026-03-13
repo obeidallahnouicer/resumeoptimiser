@@ -35,10 +35,12 @@ import type {
 
 const BASE = '/api/v1/pipeline';
 
-/** Timeout for LLM-backed stages (parse, match, explain, rewrite, compare). */
-const LLM_TIMEOUT_MS = 90_000;
+/** Timeout for LLM-backed stages (parse, match, explain, rewrite, compare). 
+ * Increased to 300s to support heavy CV parsing tasks on free-tier models.
+ */
+const LLM_TIMEOUT_MS = 300_000;
 /** Timeout for fast/deterministic stages (extract, diff, render-pdf). */
-const FAST_TIMEOUT_MS = 30_000;
+const FAST_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Error type
