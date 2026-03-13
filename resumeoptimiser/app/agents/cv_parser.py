@@ -313,15 +313,54 @@ def _parse_markdown(markdown: str) -> StructuredCVSchema:
 # ── Agent wrapper ─────────────────────────────────────────────────────────────
 
 class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
-    """Parses raw CV text into StructuredCVSchema — deterministically, zero LLM.
+    """Parses raw CV text into StructuredCVSchema using the LLM.
 
     Flow:
-      1. raw text  →  Markdown   (_raw_to_markdown)
-      2. Markdown  →  schema     (_parse_markdown)
-      3. schema.markdown = the Markdown from step 1
+      1. raw text → LLM JSON response
+      2. schema validation
+      3. Markdown generation for UI display
     """
 
     meta = AgentMeta(name="CVParserAgent", version="4.0.0")
+
+    _SYSTEM_PROMPT = (
+        "You are an expert ATS (Applicant Tracking System) CV parser. "
+        "Your task is to extract structured information from the provided raw CV text. "
+        "\n\n"
+        "### STRICT OUTPUT RULES:\n"
+        "1. Return ONLY a valid JSON object. No conversational preamble, no summary, no markdown formatting outside the JSON.\n"
+        "2. Follow the StructuredCVSchema exactly. All fields are required.\n"
+        "3. Ensure all section_type values are one of: summary, experience, education, skills, languages, certifications, projects, other.\n"
+        "\n"
+        "### JSON SCHEMA:\n"
+        "{\n"
+        "  \"contact\": {\n"
+        "    \"name\": \"Full Name\",\n"
+        "    \"email\": \"email@example.com\",\n"
+        "    \"phone\": \"+1-234-567-890\",\n"
+        "    \"location\": \"City, Country\",\n"
+        "    \"linkedin\": \"linkedin.com/in/username\",\n"
+        "    \"github\": \"github.com/username\"\n"
+        "  },\n"
+        "  \"sections\": [\n"
+        "    {\n"
+        "      \"section_type\": \"experience\",\n"
+        "      \"raw_text\": \"Full original text of this section...\",\n"
+        "      \"items\": [\"Key bullet point 1\", \"Key bullet point 2\"]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"detected_language\": \"en\",\n"
+        "  \"hard_skills\": [\"Python\", \"FastAPI\"],\n"
+        "  \"soft_skills\": [\"Leadership\"],\n"
+        "  \"tools\": [\"Docker\", \"Git\"],\n"
+        "  \"languages_spoken\": [\"English\", \"French\"],\n"
+        "  \"total_years_experience\": 5.5,\n"
+        "  \"education_level\": \"Masters\",\n"
+        "  \"certifications\": [\"AWS Solutions Architect\"],\n"
+        "  \"raw_text\": \"\",\n"
+        "  \"markdown\": \"\"\n"
+        "}\n"
+    )
 
     def __init__(self, llm: LLMClientProtocol) -> None:
         self._llm = llm
@@ -330,7 +369,10 @@ class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
         logger.info("cv_parser.start", text_length=len(input.raw_text))
 
         try:
-            llm_response = self._llm.complete(user=input.raw_text)
+            llm_response = self._llm.complete(
+                system=self._SYSTEM_PROMPT,
+                user=f"Please parse this CV text into the requested JSON structure:\n\n{input.raw_text}"
+            )
         except Exception as exc:  # pragma: no cover - defensive
             raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 
@@ -340,6 +382,9 @@ class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
         try:
             data = json.loads(llm_response)
         except Exception as exc:
+            logger.error("cv_parser.invalid_json", 
+                         error=str(exc), 
+                         llm_response_preview=llm_response[:1000])
             raise CVParsingError("LLM did not return valid JSON") from exc
 
         required_keys = {"contact", "sections", "raw_text"}
@@ -349,6 +394,9 @@ class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
         try:
             schema = StructuredCVSchema.model_validate(data)
         except Exception as exc:
+            logger.error("cv_parser.schema_mismatch", 
+                         error=str(exc), 
+                         data_preview=json.dumps(data, indent=2)[:2000])
             raise CVParsingError("LLM JSON does not match StructuredCVSchema") from exc
 
         schema.raw_text = input.raw_text
