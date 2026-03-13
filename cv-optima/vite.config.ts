@@ -23,6 +23,9 @@ export default defineConfig(({mode}) => {
           target: 'http://localhost:8000',
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api/, ''),
+          // Increase proxy timeout to 10 minutes to support long-running LLM tasks
+          timeout: 600000,
+          proxyTimeout: 600000,
         },
       },
     },
