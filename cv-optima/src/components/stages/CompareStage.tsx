@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { ArrowUpRight, FileEdit, Download, Loader2, AlertCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
-import { compareResults, renderMarkdownPdf, parseCv, ApiError } from '../../api';
+import { compareResults, renderMarkdownPdf, ApiError } from '../../api';
 import { CvMarkdownEditor } from '../ui/CvMarkdownEditor';
 import { cvToMarkdown } from '../../lib/pdf/cv_to_markdown';
 
@@ -35,24 +35,12 @@ export function CompareStage({ onReset }: CompareStageProps) {
 
     (async () => {
       try {
-        // If we have improvedMarkdown (new Markdown pipeline), re-parse it to get
-        // a proper StructuredCV for the rescorer — this gives a real score delta.
-        // If optimizedCV exists (legacy structured pipeline), use it directly.
-        let optimizedAsStructured = optimizedCV
+        // Use optimizedCV if available (legacy path), otherwise use structuredCV.
+        // The improved markdown already reflects wording changes, but we use
+        // the structured representation for rescoring (no re-parsing needed).
+        const optimizedAsStructured = optimizedCV
           ? { ...structuredCV, sections: optimizedCV.sections, contact: optimizedCV.contact }
           : structuredCV;
-
-        if (improvedMarkdown && !optimizedCV) {
-          // Re-parse the improved markdown text so the rescorer scores the actual
-          // improved content, not the original. This is a background LLM call but
-          // it's necessary for a meaningful score delta.
-          try {
-            optimizedAsStructured = await parseCv(improvedMarkdown);
-          } catch {
-            // Non-fatal: fall back to original if parse fails
-            optimizedAsStructured = structuredCV;
-          }
-        }
 
         const cvSchema = optimizedCV ?? {
           contact: optimizedAsStructured.contact,
