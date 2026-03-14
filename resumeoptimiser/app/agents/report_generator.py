@@ -14,8 +14,13 @@ from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.pipeline import ComparisonReportSchema, ImprovedScoreSchema
 from app.schemas.report import ExplanationReportSchema, OptimizedCVSchema
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "report_generator"
+_AGENT_VERSION = "1.0"
 
 _SYSTEM_PROMPT = """
 You are a concise technical writer. Summarise the CV optimisation results in
@@ -38,8 +43,13 @@ class ReportGeneratorAgent(BaseAgent[ReportGeneratorInput, ComparisonReportSchem
 
     meta = AgentMeta(name="ReportGeneratorAgent", version="1.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     def execute(self, input: ReportGeneratorInput) -> ComparisonReportSchema:  # noqa: A002
         """Build and return the final comparison report."""
@@ -58,8 +68,16 @@ class ReportGeneratorAgent(BaseAgent[ReportGeneratorInput, ComparisonReportSchem
     def _generate_narrative(self, input: ReportGeneratorInput) -> str:  # noqa: A002
         """Ask the LLM to write a brief narrative about the optimisation."""
         user_prompt = self._build_prompt(input)
+
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=user_prompt)
+            return self._llm.complete(system=system_prompt, user=user_prompt)
         except Exception as exc:
             logger.warning("report_generator.narrative_failed", error=str(exc))
             # Narrative is non-critical – fall back to empty string
