@@ -30,6 +30,7 @@ from app.agents.base import AgentMeta, BaseAgent
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.markdown import MarkdownInput, MarkdownOutput
+from app.services.cv_cache_service import CVCacheService
 
 logger = get_logger(__name__)
 
@@ -303,17 +304,44 @@ def _join_wrapped_lines(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 class OCRToMarkdownAgent(BaseAgent[MarkdownInput, MarkdownOutput]):
-    """Converts raw OCR/PDF text to structured Markdown — deterministically, no LLM."""
+    """Converts raw OCR/PDF text to structured Markdown — deterministically, no LLM.
+    
+    Caching:
+    - Computes a stable SHA256 hash of the input raw_text
+    - Checks cache for 'parsed_cv:{cv_hash}'
+    - If found: returns cached markdown (CACHE_HIT logged)
+    - If not found: converts deterministically and stores in cache (CACHE_MISS logged)
+    """
 
     meta = AgentMeta(name="OCRToMarkdownAgent", version="2.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        cv_cache: CVCacheService | None = None,
+    ) -> None:
         # LLM is accepted to keep the constructor signature compatible with deps.py,
         # but it is NOT used. Conversion is fully deterministic.
         self._llm = llm
+        self._cv_cache = cv_cache
 
     def execute(self, input: MarkdownInput) -> MarkdownOutput:  # noqa: A002
         logger.info("ocr_to_markdown.start", text_length=len(input.raw_text))
+
+        # If caching is enabled, check cache first
+        if self._cv_cache:
+            markdown_output, cache_hit = self._cv_cache.get_or_compute(
+                input.raw_text,
+                compute_fn=lambda: MarkdownOutput(markdown=_raw_to_markdown(input.raw_text)),
+            )
+            if cache_hit:
+                logger.info("ocr_to_markdown.cache_hit")
+            else:
+                logger.info("ocr_to_markdown.cache_miss")
+            logger.info("ocr_to_markdown.success", lines=markdown_output.markdown.count("\n"))
+            return markdown_output
+
+        # Fallback: no caching, convert directly
         markdown = _raw_to_markdown(input.raw_text)
         logger.info("ocr_to_markdown.success", lines=markdown.count("\n"))
         return MarkdownOutput(markdown=markdown)
