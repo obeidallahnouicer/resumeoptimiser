@@ -23,9 +23,12 @@ from app.agents.rescorer import RescoreAgent
 from app.agents.score_explainer import ScoreExplainerAgent
 from app.agents.semantic_matcher import SemanticMatcherAgent
 from app.core.config import AppSettings, get_settings
+from app.infrastructure.cache import CacheManager
 from app.infrastructure.embedding_client import SentenceTransformerEmbeddingClient
 from app.infrastructure.llm_client import RotatingLLMClient
+from app.services.cv_cache_service import CVCacheService
 from app.services.optimization_service import OptimizationService
+from app.services.prompt_cache_service import PromptCacheService
 
 # ---------------------------------------------------------------------------
 # Module-level singletons – created once when the module is first imported
@@ -42,23 +45,28 @@ if not _provider_configs:
 _llm_client = RotatingLLMClient(_provider_configs)
 _embedding_client = SentenceTransformerEmbeddingClient(_settings.embedding)
 
+# Cache layer singletons
+_cache_manager = CacheManager(default_ttl=_settings.cache.ttl_seconds)
+_prompt_cache_service = PromptCacheService(_cache_manager, ttl_seconds=_settings.cache.ttl_seconds)
+_cv_cache_service = CVCacheService(_cache_manager, ttl_seconds=_settings.cache.ttl_seconds)
+
 _matcher_agent = SemanticMatcherAgent(embedding_client=_embedding_client)
 _llm_match_analyzer = LLMMatchAnalyzerAgent(llm=_llm_client)
 _rescorer_agent = RescoreAgent(matcher=_matcher_agent, llm_match_analyzer=_llm_match_analyzer)
 
 _optimization_service = OptimizationService(
     cv_parser=CVParserAgent(llm=_llm_client),
-    job_normalizer=JobNormalizerAgent(llm=_llm_client),
+    job_normalizer=JobNormalizerAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     matcher=_matcher_agent,
     llm_match_analyzer=_llm_match_analyzer,
-    explainer=ScoreExplainerAgent(llm=_llm_client),
-    rewriter=CVRewriteAgent(llm=_llm_client),
+    explainer=ScoreExplainerAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
+    rewriter=CVRewriteAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     validator=CVValidatorAgent(),
     rescorer=_rescorer_agent,
-    report_generator=ReportGeneratorAgent(llm=_llm_client),
+    report_generator=ReportGeneratorAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     # Markdown-safe pipeline agents
-    ocr_to_markdown=OCRToMarkdownAgent(llm=_llm_client),
-    markdown_rewriter=MarkdownRewriteAgent(llm=_llm_client),
+    ocr_to_markdown=OCRToMarkdownAgent(llm=_llm_client, cv_cache=_cv_cache_service),
+    markdown_rewriter=MarkdownRewriteAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
 )
 
 
