@@ -34,6 +34,8 @@ from app.schemas.cv import (
     ContactInfoSchema,
     StructuredCVSchema,
 )
+from app.schemas.markdown import MarkdownOutput
+from app.services.cv_cache_service import CVCacheService
 
 logger = get_logger(__name__)
 
@@ -313,94 +315,61 @@ def _parse_markdown(markdown: str) -> StructuredCVSchema:
 # ── Agent wrapper ─────────────────────────────────────────────────────────────
 
 class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
-    """Parses raw CV text into StructuredCVSchema using the LLM.
+    """Parses raw CV text into StructuredCVSchema deterministically.
+
+    Pure regex-based parsing – NO LLM CALLS. Fully deterministic and fast.
 
     Flow:
-      1. raw text → LLM JSON response
-      2. schema validation
-      3. Markdown generation for UI display
+      1. raw text → clean Markdown (via _raw_to_markdown)
+      2. Markdown → StructuredCVSchema (via _parse_markdown, pure regex)
+      3. Returns parsed schema
+
+    Design:
+      - Uses CVCacheService to avoid re-parsing identical CVs
+      - Cache key is SHA256 hash of CV text
+      - Runs in < 5ms per CV
     """
 
     meta = AgentMeta(name="CVParserAgent", version="4.0.0")
 
-    _SYSTEM_PROMPT = (
-        "You are an expert ATS (Applicant Tracking System) CV parser. "
-        "Your task is to extract structured information from the provided raw CV text. "
-        "\n\n"
-        "### STRICT OUTPUT RULES:\n"
-        "1. Return ONLY a valid JSON object. No conversational preamble, no summary, no markdown formatting outside the JSON.\n"
-        "2. Follow the StructuredCVSchema exactly. All fields are required.\n"
-        "3. Ensure all section_type values are one of: summary, experience, education, skills, languages, certifications, projects, other.\n"
-        "\n"
-        "### JSON SCHEMA:\n"
-        "{\n"
-        "  \"contact\": {\n"
-        "    \"name\": \"Full Name\",\n"
-        "    \"email\": \"email@example.com\",\n"
-        "    \"phone\": \"+1-234-567-890\",\n"
-        "    \"location\": \"City, Country\",\n"
-        "    \"linkedin\": \"linkedin.com/in/username\",\n"
-        "    \"github\": \"github.com/username\"\n"
-        "  },\n"
-        "  \"sections\": [\n"
-        "    {\n"
-        "      \"section_type\": \"experience\",\n"
-        "      \"raw_text\": \"Full original text of this section...\",\n"
-        "      \"items\": [\"Key bullet point 1\", \"Key bullet point 2\"]\n"
-        "    }\n"
-        "  ],\n"
-        "  \"detected_language\": \"en\",\n"
-        "  \"hard_skills\": [\"Python\", \"FastAPI\"],\n"
-        "  \"soft_skills\": [\"Leadership\"],\n"
-        "  \"tools\": [\"Docker\", \"Git\"],\n"
-        "  \"languages_spoken\": [\"English\", \"French\"],\n"
-        "  \"total_years_experience\": 5.5,\n"
-        "  \"education_level\": \"Masters\",\n"
-        "  \"certifications\": [\"AWS Solutions Architect\"],\n"
-        "  \"raw_text\": \"\",\n"
-        "  \"markdown\": \"\"\n"
-        "}\n"
-    )
-
-    def __init__(self, llm: LLMClientProtocol) -> None:
-        self._llm = llm
+    def __init__(self, llm: LLMClientProtocol, cv_cache: CVCacheService | None = None) -> None:
+        self._llm = llm  # Kept for DI compatibility, not used
+        self._cv_cache = cv_cache
 
     def execute(self, input: CVParserInput) -> StructuredCVSchema:  # noqa: A002
         logger.info("cv_parser.start", text_length=len(input.raw_text))
 
-        try:
-            llm_response = self._llm.complete(
-                system=self._SYSTEM_PROMPT,
-                user=f"Please parse this CV text into the requested JSON structure:\n\n{input.raw_text}"
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
+        # Use cache if available
+        if self._cv_cache:
+            cv_hash = self._cv_cache.compute_cv_hash(input.raw_text)
+            cached_markdown = self._cv_cache.get(cv_hash)
+            if cached_markdown is not None:
+                logger.info("cv_parser.cache_hit", cv_hash=cv_hash)
+                # Parse the cached markdown
+                schema = _parse_markdown(cached_markdown.markdown)
+                schema.raw_text = input.raw_text
+                schema.markdown = cached_markdown.markdown
+                logger.info(
+                    "cv_parser.done",
+                    name=schema.contact.name,
+                    sections=len(schema.sections),
+                    hard_skills=len(schema.hard_skills),
+                    years=schema.total_years_experience,
+                    cache_hit=True,
+                )
+                return schema
 
-        if not llm_response:
-            raise CVParsingError("Empty response from LLM")
-
-        try:
-            data = json.loads(llm_response)
-        except Exception as exc:
-            logger.error("cv_parser.invalid_json", 
-                         error=str(exc), 
-                         llm_response_preview=llm_response[:1000])
-            raise CVParsingError("LLM did not return valid JSON") from exc
-
-        required_keys = {"contact", "sections", "raw_text"}
-        if not required_keys.issubset(set(data.keys())):
-            raise CVParsingError("LLM JSON missing required top-level keys")
-
-        try:
-            schema = StructuredCVSchema.model_validate(data)
-        except Exception as exc:
-            logger.error("cv_parser.schema_mismatch", 
-                         error=str(exc), 
-                         data_preview=json.dumps(data, indent=2)[:2000])
-            raise CVParsingError("LLM JSON does not match StructuredCVSchema") from exc
-
+        # Not in cache: generate Markdown and parse
+        markdown = _raw_to_markdown(input.raw_text)
+        schema = _parse_markdown(markdown)
         schema.raw_text = input.raw_text
-        schema.markdown = _raw_to_markdown(input.raw_text)
+        schema.markdown = markdown
+
+        # Cache the markdown for future calls with same CV
+        if self._cv_cache:
+            cv_hash = self._cv_cache.compute_cv_hash(input.raw_text)
+            self._cv_cache.set(cv_hash, MarkdownOutput(markdown=markdown))
+            logger.info("cv_parser.cache_set", cv_hash=cv_hash)
 
         logger.info(
             "cv_parser.done",
@@ -408,5 +377,6 @@ class CVParserAgent(BaseAgent[CVParserInput, StructuredCVSchema]):
             sections=len(schema.sections),
             hard_skills=len(schema.hard_skills),
             years=schema.total_years_experience,
+            cache_hit=False,
         )
         return schema
