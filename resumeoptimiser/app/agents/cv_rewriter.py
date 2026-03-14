@@ -15,10 +15,15 @@ from app.core.exceptions import AgentExecutionError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.report import CVRewriteInput, OptimizedCVSchema
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "cv_rewriter"
+_AGENT_VERSION = "2.0"
 
 _SYSTEM_PROMPT = """\
 role: professional_cv_rewriter
@@ -97,8 +102,13 @@ class CVRewriteAgent(BaseAgent[CVRewriteInput, OptimizedCVSchema]):
 
     meta = AgentMeta(name="CVRewriteAgent", version="2.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     def execute(self, input: CVRewriteInput) -> OptimizedCVSchema:  # noqa: A002
         logger.info("cv_rewrite.start", job=input.job.title)
@@ -158,8 +168,15 @@ class CVRewriteAgent(BaseAgent[CVRewriteInput, OptimizedCVSchema]):
         return "\n".join(lines)
 
     def _call_llm(self, user_prompt: str) -> str:
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=user_prompt)
+            return self._llm.complete(system=system_prompt, user=user_prompt)
         except Exception as exc:
             raise AgentExecutionError(self.meta.name, str(exc)) from exc
 
