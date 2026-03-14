@@ -21,10 +21,15 @@ from app.core.exceptions import AgentExecutionError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.scoring import LLMMatchAnalysisSchema, SemanticMatcherInput
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "llm_match_analyzer"
+_AGENT_VERSION = "1.0"
 
 _SYSTEM_PROMPT = """\
 role: cv_job_match_analyzer
