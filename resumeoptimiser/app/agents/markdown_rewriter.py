@@ -37,14 +37,14 @@ _MAX_RETRIES = 2
 
 # Agent name and version for prompt caching
 _AGENT_NAME = "markdown_rewriter"
-_AGENT_VERSION = "3.0"
+_AGENT_VERSION = "3.1"
 
 # ---------------------------------------------------------------------------
 # System prompt – used for every per-section LLM call
 # ---------------------------------------------------------------------------
 _SYSTEM_PROMPT = """\
 role: ats_cv_section_editor
-version: "3.0"
+version: "3.1"
 description: |
   You are a senior ATS-optimisation specialist and technical CV editor.
   You receive ONE SECTION of a CV in Markdown and a target job description.
@@ -52,6 +52,47 @@ description: |
     1. Rewrite wording for maximum ATS keyword density and recruiter impact.
     2. Enforce ATS-safe Markdown formatting rules so the document parses cleanly
        through Applicant Tracking Systems.
+
+  ⚠️  CRITICAL: You are a REWRITER, NOT a CONTENT GENERATOR.
+  Your job is to rephrase, reorder, and emphasise ONLY what already exists in the
+  input section. NEVER invent new facts, experiences, skills, companies, or dates.
+
+════════════════════════════════════════════════════
+ABSOLUTE HARD CONSTRAINTS — VIOLATING THESE FAILS
+════════════════════════════════════════════════════
+
+1. DO NOT INVENT NEW CONTENT:
+   ✗ WRONG: Adding "Company Name", "Month YYYY", or "Present" if they don't exist
+   ✗ WRONG: Creating new job entries or experience items not in the input
+   ✗ WRONG: Fabricating skills, tools, certifications, or languages not in input
+   ✗ WRONG: Inventing metrics, percentages, or achievements ("reduced latency by 40%")
+   ✗ WRONG: Adding fake educational degrees or institutions
+   ✓ RIGHT: Only reword EXISTING bullets, roles, dates, companies, and skills
+   ✓ RIGHT: Only rephrase and reorganize what's already there
+
+2. DO NOT REMOVE OR DELETE:
+   ✗ WRONG: Removing any bullet point, section, job entry, or education item
+   ✗ WRONG: Deleting any skill from a skills section
+   ✗ WRONG: Omitting any language or certification
+   ✓ RIGHT: Keep ALL original content; only improve wording and order
+
+3. DO NOT CHANGE CORE FACTS:
+   ✗ WRONG: Changing job titles, company names, or dates
+   ✗ WRONG: Modifying degrees, universities, or graduation dates
+   ✗ WRONG: Altering location information
+   ✓ RIGHT: Keep all proper nouns and dates exactly as provided
+
+4. DO NOT ADD SECTIONS OR STRUCTURE:
+   ✗ WRONG: Adding new ## headers not in the original section
+   ✗ WRONG: Creating new subsections or entry types
+   ✗ WRONG: Adding contact blocks, headers, or placeholder entries
+   ✓ RIGHT: Only modify text WITHIN the existing structure
+
+5. DO NOT INVENT NEW SKILLS:
+   ✗ WRONG: If "Microsoft Azure" is not mentioned, do NOT add it
+   ✗ WRONG: If "Copilot Studio" is not in the input, do NOT invent it
+   ✗ WRONG: If "Azure AI Search" is not present, do NOT fabricate bullet points
+   ✓ RIGHT: Weave EXISTING skills into bullets; never add new ones
 
 ════════════════════════════════════════════════════
 ATS FORMATTING RULES — MANDATORY, NEVER VIOLATE
@@ -120,11 +161,6 @@ CONTENT IMPROVEMENT RULES — APPLY AGGRESSIVELY
   b. Weave in job description keywords naturally into existing bullets.
   c. Make bullets punchier: remove filler, cut passive voice, compress fluff.
   d. Fix grammar errors.
-  e. Do NOT add new bullet points, new sections, or invent facts/metrics.
-  f. Do NOT delete any existing bullet point or section.
-  g. Do NOT change job titles, company names, dates, or degrees.
-  h. Do NOT introduce new skills/tools/technologies/languages/education items that were not present in the input section. Rephrase only.
-  i. Do NOT add placeholder headers or contact blocks. Never add new sections or headings.
 
 ════════════════════════════════════════════════════
 OUTPUT FORMAT
@@ -151,7 +187,7 @@ class _Section:
 class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput]):
     """Rewrites CV Markdown section-by-section to avoid LLM token/timeout limits."""
 
-    meta = AgentMeta(name="MarkdownRewriteAgent", version="3.0.0")
+    meta = AgentMeta(name="MarkdownRewriteAgent", version="3.1.0")
 
     def __init__(
         self,
@@ -327,15 +363,79 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
             raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 
     def _parse_section(self, raw: str) -> tuple[str, list[str]]:
-        """Parse LLM JSON output for a single section."""
+        """Parse LLM JSON output for a single section and remove hallucinations."""
         text = raw.strip()
         text = re.sub(r"^```(?:json)?\s*\n?", "", text)
         text = re.sub(r"\n?```\s*$", "", text)
         try:
             data = json.loads(text)
-            return data["improved_markdown"], data.get("changes_summary", [])
+            improved = data["improved_markdown"]
+            changes = data.get("changes_summary", [])
+            
+            # **Hallucination detection**: remove placeholder/fabricated content
+            improved = self._remove_hallucinated_content(improved)
+            
+            return improved, changes
         except Exception as exc:
             raise AgentExecutionError(self.meta.name, f"Parse failed: {exc}") from exc
+    
+    @staticmethod
+    def _remove_hallucinated_content(markdown: str) -> str:
+        """Remove obviously hallucinated/placeholder content from LLM output.
+        
+        Detects and removes:
+        - Entries with "Company Name" or "Month YYYY" (placeholders)
+        - Bullet points with obviously fabricated metrics or non-existent tools
+        - Placeholder section content
+        """
+        lines = markdown.splitlines()
+        filtered_lines: list[str] = []
+        in_placeholder_block = False
+        
+        for line in lines:
+            if MarkdownRewriteAgent._is_placeholder_line(line):
+                in_placeholder_block = True
+                logger.warning("hallucination_detect.placeholder", line=line)
+                continue
+            
+            if MarkdownRewriteAgent._is_fake_company_entry(line):
+                in_placeholder_block = True
+                logger.warning("hallucination_detect.fake_company", line=line)
+                continue
+            
+            if MarkdownRewriteAgent._is_placeholder_date_line(line):
+                in_placeholder_block = True
+                logger.warning("hallucination_detect.placeholder_date", line=line)
+                continue
+            
+            # Reset when hitting new section
+            if line.startswith("##"):
+                in_placeholder_block = False
+            
+            # Skip content in hallucination block, unless it's a section or blank
+            if in_placeholder_block and line.strip() and not line.startswith("##"):
+                continue
+            
+            filtered_lines.append(line)
+        
+        return "\n".join(filtered_lines)
+    
+    @staticmethod
+    def _is_placeholder_line(line: str) -> bool:
+        """Check if line contains obvious placeholder text."""
+        lower_line = line.lower()
+        return "company name" in lower_line or ("month" in lower_line and "yyyy" in lower_line)
+    
+    @staticmethod
+    def _is_fake_company_entry(line: str) -> bool:
+        """Check if line is a fake company entry like '**X | Company Name**'."""
+        return bool(re.match(r"^\*\*[^|]+\|\s*Company\s+Name\*\*$", line, re.IGNORECASE))
+    
+    @staticmethod
+    def _is_placeholder_date_line(line: str) -> bool:
+        """Check if line looks like a placeholder date entry."""
+        # Simplified: look for "Month YYYY" pattern in a date-like context
+        return bool(re.search(r"Month\s+YYYY", line, re.IGNORECASE))
 
     # ------------------------------------------------------------------
     # Post-processing normaliser — deterministic, no LLM involved
