@@ -21,10 +21,15 @@ from app.core.exceptions import AgentExecutionError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.scoring import LLMMatchAnalysisSchema, SemanticMatcherInput
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "llm_match_analyzer"
+_AGENT_VERSION = "1.0"
 
 _SYSTEM_PROMPT = """\
 role: cv_job_match_analyzer
@@ -109,18 +114,31 @@ class LLMMatchAnalyzerAgent(BaseAgent[SemanticMatcherInput, LLMMatchAnalysisSche
 
     meta = AgentMeta(name="LLMMatchAnalyzerAgent", version="1.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     def execute(self, input: SemanticMatcherInput) -> LLMMatchAnalysisSchema:  # noqa: A002
         logger.info("llm_match_analyzer.start")
 
         user_payload = self._build_user_message(input)
+
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         last_error: Exception | None = None
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                raw_json = self._llm.complete(system=_SYSTEM_PROMPT, user=user_payload)
+                raw_json = self._llm.complete(system=system_prompt, user=user_payload)
                 data = json.loads(raw_json)
                 result = LLMMatchAnalysisSchema.model_validate(data)
                 logger.info(

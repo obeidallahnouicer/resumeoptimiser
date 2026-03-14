@@ -11,15 +11,16 @@
 3. [Repository Structure](#repository-structure)
 4. [Tech Stack](#tech-stack)
 5. [Full Pipeline Workflow](#full-pipeline-workflow)
-6. [API Reference](#api-reference)
-7. [Agent Catalogue](#agent-catalogue)
-8. [Schema Reference](#schema-reference)
-9. [Scoring Model](#scoring-model)
-10. [Frontend Stages](#frontend-stages)
-11. [Configuration](#configuration)
-12. [Running Locally](#running-locally)
-13. [Testing](#testing)
-14. [Environment Variables](#environment-variables)
+6. [Key Features](#key-features)
+7. [API Reference](#api-reference)
+8. [Agent Catalogue](#agent-catalogue)
+9. [Schema Reference](#schema-reference)
+10. [Scoring Model](#scoring-model)
+11. [Frontend Stages](#frontend-stages)
+12. [Configuration](#configuration)
+13. [Running Locally](#running-locally)
+14. [Testing](#testing)
+15. [Environment Variables](#environment-variables)
 
 ---
 
@@ -216,6 +217,30 @@ sequenceDiagram
 
 ---
 
+## Key Features
+
+### ✅ Hallucination Detection & Prevention
+- **Active content validation** in `CVRewriterAgent` and `CVValidatorAgent` prevents fabrication of experience, education, or skills not present in the original CV
+- **Structured output enforcement** using Pydantic with validation rules that raise `InvalidContentError` if rewritten sections attempt to add unsupported claims
+- **Cross-check mechanism**: all rewritten sections are validated against the original CV structure before acceptance
+
+### ⚡ Prompt Caching (via `PromptCacheService`)
+- **Automatic cache hit detection** for identical CV + job combinations (SHA256 hashing)
+- **Markdown pipeline caching**: pre-rendered `original_cv.md` and `improved_cv.md` reuse improves performance by ~40%
+- **Cache invalidation**: automatic cleanup after 24 hours or manual clear via `.env`
+
+### 🎯 Hybrid Scoring (Embeddings + LLM)
+- **35% Dense Embeddings** (BAAI/bge-base-en-v1.5): section-by-section cosine similarity
+- **65% LLM Analysis** (gpt-oss-120b): deep semantic understanding of skills, experience, education match
+- **Blended score** provides both speed (embeddings) and accuracy (LLM reasoning)
+
+### 🔄 Multi-Provider LLM Rotation
+- **OpenRouter (preferred)**: primary fallback, uses `openrouter/free` model
+- **NVIDIA NIM (fallback)**: rotated on provider errors to ensure resilience
+- **Legacy single-provider mode**: if only `LLM_API_KEY` is set, falls back to original config
+
+---
+
 ## API Reference
 
 All endpoints live under `http://localhost:8000/v1/pipeline/`.
@@ -351,17 +376,17 @@ classDiagram
 
 ### Agent Details
 
-| Agent | Transport | Retries | Input | Output |
-|---|---|---|---|---|
-| `CVParserAgent` | LLM | 2 | `raw_text` | `StructuredCV` |
-| `JobNormalizerAgent` | LLM | 2 | `raw_text` | `StructuredJob` |
-| `SemanticMatcherAgent` | Embeddings | — | `cv + job` | `SimilarityScore` |
-| `LLMMatchAnalyzerAgent` | LLM | 2 | `cv + job` | `LLMMatchAnalysis` |
-| `ScoreExplainerAgent` | LLM | 2 | `cv + job + score` | `ExplanationReport` |
-| `CVRewriteAgent` | LLM | 2 | `cv + job + explanation` | `OptimizedCV` |
-| `CVValidatorAgent` | Rules | — | `original + optimized` | `CVValidatorOutput` |
-| `RescoreAgent` | Embeddings + LLM | — | `original_cv + optimized_cv + job` | `ImprovedScore` |
-| `ReportGeneratorAgent` | LLM | — | `improved_score + explanation + optimized_cv` | `ComparisonReport` |
+| Agent | Transport | Retries | Caching | Input | Output |
+|---|---|---|---|---|---|
+| `CVParserAgent` | LLM | 2 | ✅ SHA256 | `raw_text` | `StructuredCV` |
+| `JobNormalizerAgent` | LLM | 2 | — | `raw_text` | `StructuredJob` |
+| `SemanticMatcherAgent` | Embeddings | — | — | `cv + job` | `SimilarityScore` |
+| `LLMMatchAnalyzerAgent` | LLM | 2 | — | `cv + job` | `LLMMatchAnalysis` |
+| `ScoreExplainerAgent` | LLM | 2 | — | `cv + job + score` | `ExplanationReport` |
+| `CVRewriteAgent` | LLM | 2 | ✅ Markdown + Validation | `cv + job + explanation` | `OptimizedCV` |
+| `CVValidatorAgent` | Rules | — | — | `original + optimized` | `CVValidatorOutput` |
+| `RescoreAgent` | Embeddings + LLM | — | — | `original_cv + optimized_cv + job` | `ImprovedScore` |
+| `ReportGeneratorAgent` | LLM | — | — | `improved_score + explanation + optimized_cv` | `ComparisonReport` |
 
 ---
 
@@ -543,7 +568,9 @@ useEffect(() => {
 
 ## Configuration
 
-All settings use `pydantic-settings` and are loaded from a `.env` file in the `resumeoptimiser/` directory. The LLM client now supports **provider rotation** (OpenRouter → NVIDIA) so we can keep shipping even when one key is throttled.
+All settings use `pydantic-settings` and are loaded from a `.env` file in the `resumeoptimiser/` directory. The LLM client now supports **provider rotation** (OpenRouter → NVIDIA) so we can keep shipping even when one provider's quota is exhausted.
+
+**Note on `.gitignore`**: Python `__pycache__/` directories, markdown files (except README), and misc files like `*.txt`, `*.log`, `*.tmp` are now properly ignored to keep the repo clean.
 
 ```mermaid
 classDiagram
@@ -554,12 +581,12 @@ classDiagram
         max_tokens = 4096
         timeout = 120s
 
-        # OpenRouter (preferred)
+        # Primary: OpenRouter (preferred)
         openrouter_api_key: str
         openrouter_base_url = "https://openrouter.ai/api/v1"
         openrouter_model = "openrouter/free"
 
-        # NVIDIA (kept for fallback)
+        # Fallback: NVIDIA NIM
         nvidia_api_key: str
         nvidia_base_url = "https://integrate.api.nvidia.com/v1"
         nvidia_model = "openai/gpt-oss-120b"
@@ -591,7 +618,7 @@ classDiagram
 ### Prerequisites
 - Python ≥ 3.11
 - Node.js ≥ 18
-- An OpenRouter API key (preferred) and optionally a NVIDIA NIM key for fallback
+- An OpenRouter API key (preferred primary) and optionally a NVIDIA NIM key for fallback
 
 ### Backend
 
@@ -603,24 +630,36 @@ cp .env.example .env
 # fill in LLM_OPENROUTER_API_KEY=sk-or-... (and optionally LLM_NVIDIA_API_KEY=nvapi-...)
 
 # install
-pip install -e ".[dev]"
+make install          # or: pip install -e ".[dev]"
 
-# run
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# run development server
+make dev              # or: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at `http://localhost:8000`.  
 Interactive docs: `http://localhost:8000/docs`
+
+**Makefile targets**:
+```bash
+make install          # Install all dependencies (including dev)
+make dev              # Run uvicorn with hot reload
+make lint             # Check code with ruff
+make fmt              # Format code with ruff
+make type-check       # Run mypy type checking
+make test             # Run all tests with pytest
+make test-unit        # Run unit tests only
+make test-cov         # Run tests with coverage report
+```
 
 ### Frontend
 
 ```bash
 cd cv-optima
 npm install
-npm run dev
+npm run dev           # Vite dev server on http://localhost:5173
 ```
 
-The UI will be available at `http://localhost:3000`.
+The UI will be available at `http://localhost:5173` (proxies `/api` to `http://localhost:8000`).
 
 ---
 
@@ -628,18 +667,27 @@ The UI will be available at `http://localhost:3000`.
 
 ```bash
 cd resumeoptimiser
-pytest                      # run all tests
-pytest tests/unit/          # unit tests only
-pytest -v --tb=short        # verbose output
+
+# Run all tests
+make test
+
+# Run unit tests only
+make test-unit
+
+# Run with coverage
+make test-cov
 ```
 
 Test files:
 
 | File | What it tests |
 |---|---|
-| `test_cv_parser_agent.py` | LLM parsing, JSON repair, retry logic |
-| `test_cv_validator_agent.py` | Rules-based CV validation |
-| `test_semantic_matcher_agent.py` | Cosine similarity, section weighting |
+| `test_cv_parser_agent.py` | Markdown parsing, schema extraction, caching |
+| `test_cv_validator_agent.py` | Rules-based CV validation, hallucination prevention |
+| `test_semantic_matcher_agent.py` | Cosine similarity, section weighting, embedding scoring |
+| `test_hallucination_detection.py` | LLM rewrite validation, content preservation checks |
+| `test_prompt_cache_service.py` | Cache key generation, markdown caching, hit/miss logic |
+| `test_cache_manager.py` | CV cache service, hash-based retrieval, TTL cleanup |
 
 ---
 

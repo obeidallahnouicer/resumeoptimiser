@@ -15,10 +15,15 @@ from app.core.exceptions import AgentExecutionError, LLMError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.report import ExplanationReportSchema, ScoreExplainerInput
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "score_explainer"
+_AGENT_VERSION = "2.0"
 
 _SYSTEM_PROMPT = """\
 role: career_gap_analyzer
@@ -79,8 +84,13 @@ class ScoreExplainerAgent(BaseAgent[ScoreExplainerInput, ExplanationReportSchema
 
     meta = AgentMeta(name="ScoreExplainerAgent", version="2.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     def execute(self, input: ScoreExplainerInput) -> ExplanationReportSchema:  # noqa: A002
         logger.info("score_explainer.start", overall_score=input.score.overall)
@@ -154,8 +164,15 @@ class ScoreExplainerAgent(BaseAgent[ScoreExplainerInput, ExplanationReportSchema
         return "\n".join(lines)
 
     def _call_llm(self, user_prompt: str) -> str:
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=user_prompt)
+            return self._llm.complete(system=system_prompt, user=user_prompt)
         except LLMError:
             raise
         except Exception as exc:

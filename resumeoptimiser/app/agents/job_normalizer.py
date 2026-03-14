@@ -15,10 +15,15 @@ from app.core.exceptions import AgentExecutionError, JobNormalizationError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.job import JobNormalizerInput, StructuredJobSchema
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "job_normalizer"
+_AGENT_VERSION = "2.0"
 
 _SYSTEM_PROMPT = """\
 role: job_description_normalisation_engine
@@ -131,8 +136,13 @@ class JobNormalizerAgent(BaseAgent[JobNormalizerInput, StructuredJobSchema]):
 
     meta = AgentMeta(name="JobNormalizerAgent", version="2.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     def execute(self, input: JobNormalizerInput) -> StructuredJobSchema:  # noqa: A002
         """Normalise raw job description text.
@@ -158,8 +168,15 @@ class JobNormalizerAgent(BaseAgent[JobNormalizerInput, StructuredJobSchema]):
         raise last_error  # type: ignore[misc]
 
     def _call_llm(self, raw_text: str) -> str:
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=raw_text)
+            return self._llm.complete(system=system_prompt, user=raw_text)
         except Exception as exc:
             raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 

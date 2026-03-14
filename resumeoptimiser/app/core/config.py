@@ -144,6 +144,21 @@ class DatabaseSettings(BaseSettings):
     database_url: str = Field(default="postgresql://localhost/resumeoptimiser")
 
 
+class CacheSettings(BaseSettings):
+    """Settings scoped to caching layer."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CACHE_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Time-to-live for cached entries (seconds). 0 = no expiration.
+    # Typical value: 3600 (1 hour) for production, higher for less-frequent changes.
+    ttl_seconds: float = Field(default=3600.0, ge=0.0)
+
+
 class AppSettings(BaseSettings):
     """Top-level application settings."""
 
@@ -163,6 +178,7 @@ class AppSettings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
 
 
 @lru_cache(maxsize=1)
