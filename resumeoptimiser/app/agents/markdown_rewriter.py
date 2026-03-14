@@ -314,8 +314,15 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
         return "\n".join(parts)
 
     def _call_llm(self, user_prompt: str) -> str:
+        # Load system prompt from cache (or store if not cached)
+        system_prompt = _SYSTEM_PROMPT
+        if self._prompt_cache:
+            system_prompt = self._prompt_cache.get_or_set(
+                _AGENT_NAME, _AGENT_VERSION, _SYSTEM_PROMPT
+            )
+
         try:
-            return self._llm.complete(system=_SYSTEM_PROMPT, user=user_prompt)
+            return self._llm.complete(system=system_prompt, user=user_prompt)
         except Exception as exc:
             raise AgentExecutionError(self.meta.name, f"LLM call failed: {exc}") from exc
 
