@@ -29,10 +29,15 @@ from app.core.exceptions import AgentExecutionError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.markdown import MarkdownRewriteInput, MarkdownRewriteOutput
+from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
 
 _MAX_RETRIES = 2
+
+# Agent name and version for prompt caching
+_AGENT_NAME = "markdown_rewriter"
+_AGENT_VERSION = "3.0"
 
 # ---------------------------------------------------------------------------
 # System prompt – used for every per-section LLM call
@@ -148,8 +153,13 @@ class MarkdownRewriteAgent(BaseAgent[MarkdownRewriteInput, MarkdownRewriteOutput
 
     meta = AgentMeta(name="MarkdownRewriteAgent", version="3.0.0")
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(
+        self,
+        llm: LLMClientProtocol,
+        prompt_cache: PromptCacheService | None = None,
+    ) -> None:
         self._llm = llm
+        self._prompt_cache = prompt_cache
 
     # ------------------------------------------------------------------
     # Public interface
