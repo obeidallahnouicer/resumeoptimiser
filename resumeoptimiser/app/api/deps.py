@@ -55,7 +55,7 @@ _llm_match_analyzer = LLMMatchAnalyzerAgent(llm=_llm_client)
 _rescorer_agent = RescoreAgent(matcher=_matcher_agent, llm_match_analyzer=_llm_match_analyzer)
 
 _optimization_service = OptimizationService(
-    cv_parser=CVParserAgent(llm=_llm_client),
+    cv_parser=CVParserAgent(llm=_llm_client, cv_cache=_cv_cache_service),
     job_normalizer=JobNormalizerAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     matcher=_matcher_agent,
     llm_match_analyzer=_llm_match_analyzer,
