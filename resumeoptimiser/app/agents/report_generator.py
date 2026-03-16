@@ -13,7 +13,7 @@ from app.core.exceptions import AgentExecutionError
 from app.core.logging import get_logger
 from app.infrastructure.llm_client import LLMClientProtocol
 from app.schemas.pipeline import ComparisonReportSchema, ImprovedScoreSchema
-from app.schemas.report import ExplanationReportSchema, OptimizedCVSchema
+from app.schemas.report import ExplanationReportSchema, OptimizedCVSchema, IdealProfileSchema
 from app.services.prompt_cache_service import PromptCacheService
 
 logger = get_logger(__name__)
@@ -36,6 +36,7 @@ class ReportGeneratorInput:
     improved_score: ImprovedScoreSchema
     explanation: ExplanationReportSchema
     optimized_cv: OptimizedCVSchema
+    ideal_profile: IdealProfileSchema
 
 
 class ReportGeneratorAgent(BaseAgent[ReportGeneratorInput, ComparisonReportSchema]):
@@ -62,6 +63,7 @@ class ReportGeneratorAgent(BaseAgent[ReportGeneratorInput, ComparisonReportSchem
             improved_score=input.improved_score,
             explanation=input.explanation,
             optimized_cv=input.optimized_cv,
+            ideal_profile=input.ideal_profile,
             narrative=narrative,
         )
 
