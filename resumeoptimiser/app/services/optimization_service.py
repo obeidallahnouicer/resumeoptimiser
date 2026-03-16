@@ -27,6 +27,9 @@ from __future__ import annotations
 from app.agents.cv_parser import CVParserAgent
 from app.agents.cv_rewriter import CVRewriteAgent
 from app.agents.cv_validator import CVValidatorAgent, CVValidatorInput
+from app.agents.ideal_profile_agent import IdealProfileAgent
+from app.agents.cv_rewrite_stage1_agent import CVRewriteStage1Agent
+from app.agents.cv_rewrite_stage2_agent import CVRewriteStage2Agent
 from app.agents.job_normalizer import JobNormalizerAgent
 from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
 from app.agents.markdown_rewriter import MarkdownRewriteAgent
@@ -46,7 +49,13 @@ from app.schemas.markdown import (
     MarkdownRewriteOutput,
 )
 from app.schemas.pipeline import ComparisonReportSchema
-from app.schemas.report import CVRewriteInput, ScoreExplainerInput
+from app.schemas.report import (
+    CVRewriteInput,
+    CVRewriteStage1Input,
+    CVRewriteStage2Input,
+    IdealProfileInput,
+    ScoreExplainerInput,
+)
 from app.schemas.scoring import SemanticMatcherInput, SimilarityScoreSchema
 from app.services.cv_to_markdown import structured_cv_to_markdown
 
@@ -58,16 +67,31 @@ _LLM_WEIGHT = 0.65
 
 
 class OptimizationService:
-    """Orchestrates the full CV optimisation pipeline."""
+    """Orchestrates the full CV optimisation pipeline.
+
+    New pipeline (with ideal profile and two-stage rewrite):
+      1. parseCV
+      2. normalizeJob
+      3. generateIdealProfile (new)
+      4. score (embedding + LLM)
+      5. explain (LLM)
+      6. rewriteStage1 (LLM, language transformation)
+      7. rewriteStage2 (LLM, gap closing)
+      8. validate (rules)
+      9. rescore (embedding)
+      10. generateReport (LLM)
+    """
 
     def __init__(
         self,
         cv_parser: CVParserAgent,
         job_normalizer: JobNormalizerAgent,
+        ideal_profile_agent: IdealProfileAgent,
         matcher: SemanticMatcherAgent,
         llm_match_analyzer: LLMMatchAnalyzerAgent,
         explainer: ScoreExplainerAgent,
-        rewriter: CVRewriteAgent,
+        rewriter_stage1: CVRewriteStage1Agent,
+        rewriter_stage2: CVRewriteStage2Agent,
         validator: CVValidatorAgent,
         rescorer: RescoreAgent,
         report_generator: ReportGeneratorAgent,
@@ -76,10 +100,12 @@ class OptimizationService:
     ) -> None:
         self._cv_parser = cv_parser
         self._job_normalizer = job_normalizer
+        self._ideal_profile_agent = ideal_profile_agent
         self._matcher = matcher
         self._llm_match_analyzer = llm_match_analyzer
         self._explainer = explainer
-        self._rewriter = rewriter
+        self._rewriter_stage1 = rewriter_stage1
+        self._rewriter_stage2 = rewriter_stage2
         self._validator = validator
         self._rescorer = rescorer
         self._report_generator = report_generator
@@ -87,18 +113,47 @@ class OptimizationService:
         self._markdown_rewriter = markdown_rewriter
 
     def run(self, cv_text: str, job_text: str) -> ComparisonReportSchema:
-        """Execute the full pipeline end-to-end."""
+        """Execute the full pipeline end-to-end.
+
+        Pipeline flow:
+          1. Parse CV and Job (parallel Wave 1)
+          2. Generate Ideal Profile from Job
+          3. Score CV against Job (embedding + LLM)
+          4. Explain gaps (LLM)
+          5. Rewrite Stage 1 – language transformation using ideal profile
+          6. Rewrite Stage 2 – gap closing
+          7. Validate rewritten CV
+          8. Rescore improved CV
+          9. Generate final report
+        """
         logger.info("pipeline.start")
 
+        # Wave 1: Parse CV and Job in parallel
         structured_cv = self._parse_cv(cv_text)
         structured_job = self._parse_job(job_text)
+
+        # Generate ideal profile (guides the rewrite stages)
+        ideal_profile = self._generate_ideal_profile(structured_job)
+
+        # Score original CV
         original_score = self._score(structured_cv, structured_job)
+
+        # Explain gaps
         explanation = self._explain(structured_cv, structured_job, original_score)
-        optimized_cv = self._rewrite(structured_cv, structured_job, explanation)
+
+        # Two-stage rewrite
+        rewritten_stage1 = self._rewrite_stage1(structured_cv, ideal_profile)
+        optimized_cv = self._rewrite_stage2(rewritten_stage1, explanation)
+
+        # Validate and rescore
         self._validate(structured_cv, optimized_cv)
         optimized_as_structured = self._optimized_to_structured(optimized_cv, structured_cv)
-        improved_score = self._rescore(structured_cv, optimized_as_structured, structured_job, original_score)
-        report = self._generate_report(improved_score, explanation, optimized_cv)
+        improved_score = self._rescore(
+            structured_cv, optimized_as_structured, structured_job, original_score
+        )
+
+        # Generate final report
+        report = self._generate_report(improved_score, explanation, optimized_cv, ideal_profile)
 
         logger.info("pipeline.complete", delta=improved_score.delta)
         return report
@@ -112,6 +167,10 @@ class OptimizationService:
 
     def _parse_job(self, job_text: str):
         return self._job_normalizer.execute(JobNormalizerInput(raw_text=job_text))
+
+    def _generate_ideal_profile(self, job):
+        """Generate ideal candidate profile from structured job."""
+        return self._ideal_profile_agent.execute(IdealProfileInput(job=job))
 
     def _score(self, cv, job) -> SimilarityScoreSchema:
         """Run embedding matcher + LLM match analyzer, then blend."""
@@ -146,8 +205,13 @@ class OptimizationService:
     def _explain(self, cv, job, score):
         return self._explainer.execute(ScoreExplainerInput(cv=cv, job=job, score=score))
 
-    def _rewrite(self, cv, job, explanation):
-        return self._rewriter.execute(CVRewriteInput(cv=cv, job=job, explanation=explanation))
+    def _rewrite_stage1(self, cv, ideal_profile):
+        """Rewrite CV using ideal profile vocabulary (language transformation)."""
+        return self._rewriter_stage1.execute(CVRewriteStage1Input(cv=cv, ideal_profile=ideal_profile))
+
+    def _rewrite_stage2(self, cv_rewrite_stage1, explanation):
+        """Refine rewritten CV by addressing gaps (gap closing)."""
+        return self._rewriter_stage2.execute(CVRewriteStage2Input(cv_rewrite_stage1=cv_rewrite_stage1, comparison_report=explanation))
 
     def _validate(self, original_cv, optimized_cv):
         result = self._validator.execute(CVValidatorInput(original=original_cv, optimized=optimized_cv))
@@ -172,12 +236,13 @@ class OptimizationService:
             )
         )
 
-    def _generate_report(self, improved_score, explanation, optimized_cv):
+    def _generate_report(self, improved_score, explanation, optimized_cv, ideal_profile):
         return self._report_generator.execute(
             ReportGeneratorInput(
                 improved_score=improved_score,
                 explanation=explanation,
                 optimized_cv=optimized_cv,
+                ideal_profile=ideal_profile,
             )
         )
 
