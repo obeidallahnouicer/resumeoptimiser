@@ -266,17 +266,24 @@ def _parse_markdown(markdown: str) -> StructuredCVSchema:
             # For experience/projects/summary: bullets are body content, not key items
             # For skills/languages/certs/education: bullets ARE the items
             if current_section == SectionType.SKILLS:
-                current_items.append(item)
-                kind = _classify_skill(item)
-                if kind == "soft":
-                    soft_skills.append(item)
-                elif kind == "tool":
-                    tools.append(item)
-                else:
-                    hard_skills.append(item)
+                # Skills may be inline-separated with · — split them
+                skill_parts = [s.strip() for s in item.split("·") if s.strip()]
+                for skill in skill_parts:
+                    current_items.append(skill)
+                    kind = _classify_skill(skill)
+                    if kind == "soft":
+                        soft_skills.append(skill)
+                    elif kind == "tool":
+                        tools.append(skill)
+                    else:
+                        hard_skills.append(skill)
             elif current_section == SectionType.LANGUAGES:
-                languages_spoken.append(item)
-                current_items.append(item)
+                # Languages may have proficiency level: "Arabic — Native"
+                # Extract just the language name (before the —)
+                lang_name = item.split("—")[0].strip() if "—" in item else item.strip()
+                if lang_name and lang_name != "-":  # Skip just the dash
+                    languages_spoken.append(lang_name)
+                    current_items.append(item)
             elif current_section == SectionType.CERTIFICATIONS:
                 certifications.append(item)
                 current_items.append(item)
