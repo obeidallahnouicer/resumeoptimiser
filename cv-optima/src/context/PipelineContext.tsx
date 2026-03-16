@@ -36,6 +36,9 @@ interface PipelineState {
   improvedMarkdown: string | null;   // improved_cv.md – wording only
   markdownDiff: MarkdownDiffOutput | null;
 
+  // Skill editor state – tracks user edits to hard skills
+  editedHardSkills: string[] | null;
+
   // Error tracking
   error: string | null;
 }
@@ -51,6 +54,7 @@ interface PipelineActions {
   setOriginalMarkdown: (md: string) => void;
   setImprovedMarkdown: (md: string) => void;
   setMarkdownDiff: (diff: MarkdownDiffOutput) => void;
+  setEditedHardSkills: (skills: string[]) => void;
   setError: (message: string | null) => void;
   reset: () => void;
 }
@@ -68,6 +72,7 @@ const initialState: PipelineState = {
   originalMarkdown: null,
   improvedMarkdown: null,
   markdownDiff: null,
+  editedHardSkills: null,
   error: null,
 };
 
@@ -106,6 +111,9 @@ export function PipelineProvider({ children }: { children: ReactNode }) {
 
     setMarkdownDiff: (diff) =>
       setState((s) => ({ ...s, markdownDiff: diff })),
+
+    setEditedHardSkills: (skills) =>
+      setState((s) => ({ ...s, editedHardSkills: skills })),
 
     setError: (message) =>
       setState((s) => ({ ...s, error: message })),
