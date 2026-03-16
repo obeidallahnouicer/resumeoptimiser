@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.schemas.scoring import SimilarityScoreSchema
-from app.schemas.report import ExplanationReportSchema, OptimizedCVSchema
+from app.schemas.report import ExplanationReportSchema, OptimizedCVSchema, IdealProfileSchema
 
 
 class ImprovedScoreSchema(BaseModel):
@@ -22,6 +22,10 @@ class ComparisonReportSchema(BaseModel):
     improved_score: ImprovedScoreSchema
     explanation: ExplanationReportSchema
     optimized_cv: OptimizedCVSchema
+    ideal_profile: IdealProfileSchema = Field(
+        default_factory=lambda: IdealProfileSchema(),
+        description="Ideal candidate profile generated from the job.",
+    )
     narrative: str = Field(default="", description="Human-readable summary of improvements.")
 
 
