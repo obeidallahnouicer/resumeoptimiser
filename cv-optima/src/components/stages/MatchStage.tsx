@@ -5,10 +5,11 @@ import { useEffect, useRef, useState } from 'react';
 import { usePipeline } from '../../context/PipelineContext';
 import { matchCvToJob, ApiError } from '../../api';
 
-interface MatchStageProps { onComplete: () => void; }
+interface MatchStageProps { readonly onComplete: () => void; }
 
-export function MatchStage({ onComplete }: MatchStageProps) {
-  const { structuredCV, structuredJob, similarityScore, setSimilarityScore, setError } = usePipeline();
+export function MatchStage(props: MatchStageProps) {
+  const { onComplete } = props;
+  const { structuredCV, structuredJob, editedHardSkills, similarityScore, setSimilarityScore, setError } = usePipeline();
   const [loading, setLoading] = useState(!similarityScore);
   const [errorMsg, setErrorMsg] = useState('');
   const calledRef = useRef(false);
@@ -20,7 +21,12 @@ export function MatchStage({ onComplete }: MatchStageProps) {
     calledRef.current = true;
     (async () => {
       try {
-        const score = await matchCvToJob({ cv: structuredCV, job: structuredJob });
+        // Use edited hard skills if available, otherwise use parsed hard skills
+        const cvToMatch = editedHardSkills
+          ? { ...structuredCV, hard_skills: editedHardSkills }
+          : structuredCV;
+        
+        const score = await matchCvToJob({ cv: cvToMatch, job: structuredJob });
         setSimilarityScore(score);
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : 'Matching failed.';
