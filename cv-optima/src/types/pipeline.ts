@@ -145,6 +145,19 @@ export interface ExplanationReport {
   summary: string;
 }
 
+// ---------------------------------------------------------------------------
+// Ideal Profile (from IdealProfileAgent)
+// ---------------------------------------------------------------------------
+
+export interface IdealProfile {
+  role_summary: string;
+  core_competencies: string[];
+  technical_stack: string[];
+  preferred_action_verbs: string[];
+  impact_patterns: string[];
+  domain_language: string[];
+}
+
 export interface OptimizedCV {
   contact: ContactInfo;
   sections: CVSection[];
@@ -165,6 +178,7 @@ export interface ComparisonReport {
   improved_score: ImprovedScore;
   explanation: ExplanationReport;
   optimized_cv: OptimizedCV;
+  ideal_profile: IdealProfile;
   narrative: string;
 }
 
