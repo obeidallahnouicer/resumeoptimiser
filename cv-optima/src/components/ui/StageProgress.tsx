@@ -1,15 +1,16 @@
 import { motion } from 'motion/react';
 import { Check } from 'lucide-react';
 
-export type Stage = 'upload' | 'parse' | 'match' | 'explain' | 'rewrite' | 'compare';
+export type Stage = 'upload' | 'parse' | 'skill-editor' | 'match' | 'explain' | 'rewrite' | 'compare';
 
 interface StageProgressProps {
-  currentStage: Stage;
+  readonly currentStage: Stage;
 }
 
 const STAGES: { id: Stage; label: string }[] = [
   { id: 'upload', label: 'Upload' },
   { id: 'parse', label: 'Parse' },
+  { id: 'skill-editor', label: 'Skills' },
   { id: 'match', label: 'Match' },
   { id: 'explain', label: 'Explain' },
   { id: 'rewrite', label: 'Rewrite' },
