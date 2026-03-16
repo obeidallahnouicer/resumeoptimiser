@@ -9,6 +9,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { StageProgress, Stage } from './components/ui/StageProgress';
 import { UploadStage } from './components/stages/UploadStage';
 import { ParseStage } from './components/stages/ParseStage';
+import { SkillEditorStep } from './components/stages/SkillEditorStep';
 import { MatchStage } from './components/stages/MatchStage';
 import { ExplainStage } from './components/stages/ExplainStage';
 import { RewriteStage } from './components/stages/RewriteStage';
@@ -27,7 +28,9 @@ export default function App() {
       case 'upload':
         return <UploadStage onComplete={() => handleStageComplete('parse')} />;
       case 'parse':
-        return <ParseStage onComplete={() => handleStageComplete('match')} />;
+        return <ParseStage onComplete={() => handleStageComplete('skill-editor')} />;
+      case 'skill-editor':
+        return <SkillEditorStep onComplete={() => handleStageComplete('match')} />;
       case 'match':
         return <MatchStage onComplete={() => handleStageComplete('explain')} />;
       case 'explain':
