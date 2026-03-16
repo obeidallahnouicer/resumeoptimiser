@@ -6,7 +6,7 @@
  * api.ts and store results via the setters provided by this context.
  */
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode, useMemo } from 'react';
 import type {
   StructuredCV,
   StructuredJob,
@@ -14,6 +14,7 @@ import type {
   ExplanationReport,
   OptimizedCV,
   ComparisonReport,
+  IdealProfile,
   MarkdownDiffOutput,
 } from '../types/pipeline';
 
@@ -28,6 +29,7 @@ interface PipelineState {
   structuredJob: StructuredJob | null;
   similarityScore: SimilarityScore | null;
   explanationReport: ExplanationReport | null;
+  idealProfile: IdealProfile | null;
   optimizedCV: OptimizedCV | null;
   comparisonReport: ComparisonReport | null;
 
@@ -49,6 +51,7 @@ interface PipelineActions {
   setStructuredJob: (job: StructuredJob) => void;
   setSimilarityScore: (score: SimilarityScore) => void;
   setExplanationReport: (report: ExplanationReport) => void;
+  setIdealProfile: (profile: IdealProfile) => void;
   setOptimizedCV: (cv: OptimizedCV) => void;
   setComparisonReport: (report: ComparisonReport) => void;
   setOriginalMarkdown: (md: string) => void;
@@ -67,6 +70,7 @@ const initialState: PipelineState = {
   structuredJob: null,
   similarityScore: null,
   explanationReport: null,
+  idealProfile: null,
   optimizedCV: null,
   comparisonReport: null,
   originalMarkdown: null,
@@ -78,7 +82,7 @@ const initialState: PipelineState = {
 
 const PipelineContext = createContext<(PipelineState & PipelineActions) | null>(null);
 
-export function PipelineProvider({ children }: { children: ReactNode }) {
+export function PipelineProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [state, setState] = useState<PipelineState>(initialState);
 
   const actions: PipelineActions = {
@@ -96,6 +100,9 @@ export function PipelineProvider({ children }: { children: ReactNode }) {
 
     setExplanationReport: (report) =>
       setState((s) => ({ ...s, explanationReport: report })),
+
+    setIdealProfile: (profile) =>
+      setState((s) => ({ ...s, idealProfile: profile })),
 
     setOptimizedCV: (cv) =>
       setState((s) => ({ ...s, optimizedCV: cv })),
@@ -121,8 +128,10 @@ export function PipelineProvider({ children }: { children: ReactNode }) {
     reset: () => setState(initialState),
   };
 
+  const contextValue = useMemo(() => ({ ...state, ...actions }), [state]);
+
   return (
-    <PipelineContext.Provider value={{ ...state, ...actions }}>
+    <PipelineContext.Provider value={contextValue}>
       {children}
     </PipelineContext.Provider>
   );
