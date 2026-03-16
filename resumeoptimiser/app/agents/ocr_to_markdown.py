@@ -63,7 +63,8 @@ _ENTRY_HEADER_RE = re.compile(r".{3,}\s*[|–—]\s*.{2,}")
 # Date/location lines that look like entry headers but aren't (start with month or year)
 _DATE_START_RE = re.compile(
     r"^(January|February|March|April|May|June|July|August|September|"
-    r"October|November|December|\d{4})\b",
+    r"October|November|December|"
+    r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|\d{4})\b",
     re.IGNORECASE,
 )
 
@@ -95,14 +96,29 @@ def _is_entry_header(line: str) -> bool:
     Explicitly rejects date/location lines like
     "January 2026 - Present  |  Tunis, Tunisia" — those start with a month
     name or a four-digit year and are metadata, not entry headers.
+    
+    Also rejects language/skill lines like "- Arabic — Native" or "- Python" 
+    which have a dash-like separator but are bullet items, not entry headers.
     """
     s = line.strip()
     if len(s) > 160 or not s:
         return False
     if s[0].islower():
         return False
+    # Reject lines that start with a bullet marker (- • *)
+    # These are bullet items, not entry headers, even if they contain –
+    if _BULLET_RE.match(line):
+        return False
     # Date lines start with a month name or year — they are *not* entry headers
     if _DATE_START_RE.match(s):
+        return False
+    # Reject if the line is mostly dates/times/locations with only one separator
+    # Pattern: "Month YYYY – Present | Location" or "YYYY – YYYY | Location"
+    # These should be treated as plain text metadata, not entry headers
+    # A real entry header has meaningful role/title text, not just dates
+    if re.search(r"^\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", s, re.IGNORECASE):
+        return False
+    if re.search(r"^\d{4}\s*[–—-]\s*(\d{4}|present)", s, re.IGNORECASE):
         return False
     return bool(_ENTRY_HEADER_RE.match(s))
 
@@ -148,7 +164,7 @@ def _looks_like_name(line: str) -> bool:
     A name line must NOT contain email/phone/URL (those are contact lines, not names).
     """
     s = line.strip()
-    if not s or len(s) > 60 or len(s.split()) < 2:
+    if not s or len(s) > 60:
         return False
     # Reject if it contains contact signals
     if _EMAIL_RE.search(s) or _URL_RE.search(s):
@@ -159,7 +175,10 @@ def _looks_like_name(line: str) -> bool:
     # Allow only letters, spaces, hyphens, apostrophes (no pipes, colons, etc.)
     if re.search(r"[^A-Za-zÀ-ÖØ-öø-ÿ\s'\-]", s):
         return False
-    return s.isupper() or s.istitle()
+    # Allow 1+ word (not just "John Smith" but also single names like "Obeid")
+    # Must be title-cased, all-caps, or start with uppercase
+    word_count = len(s.split())
+    return word_count >= 1 and (s.isupper() or s.istitle() or s[0].isupper())
 
 
 # ---------------------------------------------------------------------------
