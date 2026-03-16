@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from app.agents.cv_parser import CVParserAgent
 from app.agents.cv_rewriter import CVRewriteAgent
+from app.agents.cv_rewrite_stage1_agent import CVRewriteStage1Agent
+from app.agents.cv_rewrite_stage2_agent import CVRewriteStage2Agent
 from app.agents.cv_validator import CVValidatorAgent
+from app.agents.ideal_profile_agent import IdealProfileAgent
 from app.agents.job_normalizer import JobNormalizerAgent
 from app.agents.llm_match_analyzer import LLMMatchAnalyzerAgent
 from app.agents.markdown_rewriter import MarkdownRewriteAgent
@@ -57,10 +60,12 @@ _rescorer_agent = RescoreAgent(matcher=_matcher_agent, llm_match_analyzer=_llm_m
 _optimization_service = OptimizationService(
     cv_parser=CVParserAgent(llm=_llm_client, cv_cache=_cv_cache_service),
     job_normalizer=JobNormalizerAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
+    ideal_profile_agent=IdealProfileAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     matcher=_matcher_agent,
     llm_match_analyzer=_llm_match_analyzer,
     explainer=ScoreExplainerAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
-    rewriter=CVRewriteAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
+    rewriter_stage1=CVRewriteStage1Agent(llm=_llm_client, prompt_cache=_prompt_cache_service),
+    rewriter_stage2=CVRewriteStage2Agent(llm=_llm_client, prompt_cache=_prompt_cache_service),
     validator=CVValidatorAgent(),
     rescorer=_rescorer_agent,
     report_generator=ReportGeneratorAgent(llm=_llm_client, prompt_cache=_prompt_cache_service),
